@@ -1,0 +1,7 @@
+###### REQUIREMENTS ######
+colorama
+click
+click_config_file
+ckanapi
+dateparser
+jsonschema
