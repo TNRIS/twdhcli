@@ -43,6 +43,9 @@ def setup_logger(name, log_file, level=logging.INFO):
 @click.option('--verbose',
               is_flag=True,
               help='Show more information while processing.')
+@click.option('--quiet',
+              is_flag=True,
+              help='Don\'t show information while processing.')
 @click.option('--debug',
               is_flag=True,
               help='Show debugging messages.')
@@ -54,8 +57,16 @@ def setup_logger(name, log_file, level=logging.INFO):
 @click_config_file.configuration_option(config_file_name='twdhcli.ini')
 @click.version_option(version)
 @click.pass_context
-def twdhcli(ctx, host, apikey, test_run, verbose, debug, logfile):
-    """ TWDH-specific CKAN maintenance commands """
+def twdhcli(ctx, host, apikey, test_run, verbose, quiet, debug, logfile):
+    """\b
+       __               ____         ___
+      / /__      ______/ / /_  _____/ (_)
+     / __/ | /| / / __  / __ \/ ___/ / /
+    / /_ | |/ |/ / /_/ / / / / /__/ / /
+    \__/ |__/|__/\__,_/_/ /_/\___/_/_/
+
+    TWDH-specific CKAN maintenance commands 
+    """
 
     logger = setup_logger('mainlogger', logfile,
                           logging.DEBUG if debug else logging.INFO)
@@ -126,7 +137,10 @@ def update_dates(ctx):
             dataset['update_type'], 
             dataset['update_frequency'] ) )
 
-        if ( dataset['update_frequency'] in update_daily ) \
+        if not 'date_range' in dataset or dataset['date_range'] == '':
+            logecho( '     > no date range, skipping' )
+
+        elif ( dataset['update_frequency'] in update_daily ) \
             or ( dataset['update_frequency'] in update_after_second and dom > 2 ) \
             or ( dataset['update_frequency'] in update_after_seventh and dom > 7 ):
 
