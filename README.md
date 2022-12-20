@@ -61,7 +61,7 @@ Run TWDH-specific maintenance commands
 Options:
   --host TEXT          TWDH CKAN host.  [required]
   --apikey TEXT        TWDH CKAN api key to use.  [required]
-  --test-run      Show what would change but don't make any changes.
+  --test-run           Show what would change but don't make any changes.
   --verbose            Show more information while processing.
   --debug              Show debugging messages.
   --logfile PATH       The full path of the main log file.  [default: ./twdhcli.log]

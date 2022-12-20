@@ -13,9 +13,11 @@ import shutil
 import dateparser
 from jsonschema import validate
 import re
+from collections import Counter
 
 version = '0.1'
 formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
+counter = {}
 
 def setup_logger(name, log_file, level=logging.INFO):
     """To setup as many loggers as you want"""
@@ -43,9 +45,6 @@ def setup_logger(name, log_file, level=logging.INFO):
 @click.option('--verbose',
               is_flag=True,
               help='Show more information while processing.')
-@click.option('--quiet',
-              is_flag=True,
-              help='Don\'t show information while processing.')
 @click.option('--debug',
               is_flag=True,
               help='Show debugging messages.')
@@ -57,7 +56,7 @@ def setup_logger(name, log_file, level=logging.INFO):
 @click_config_file.configuration_option(config_file_name='twdhcli.ini')
 @click.version_option(version)
 @click.pass_context
-def twdhcli(ctx, host, apikey, test_run, verbose, quiet, debug, logfile):
+def twdhcli(ctx, host, apikey, test_run, verbose, debug, logfile):
     """\b
        __               ____         ___
       / /__      ______/ / /_  _____/ (_)
@@ -90,7 +89,7 @@ def twdhcli(ctx, host, apikey, test_run, verbose, quiet, debug, logfile):
             click.echo(Fore.GREEN + message)
 
     # twdhcli func main
-    logecho('Starting twdhcli/%s...' % version)
+    logecho('Starting twdhcli/%s ...' % version)
 
     # log into CKAN
     try:
@@ -121,7 +120,10 @@ def update_dates(ctx):
     test_run = ctx.obj['test_run']
     portal = ctx.obj['portal']
 
-    logecho( 'Updating dates ... ' )
+    logecho( 'Running update-dates command ... ' )
+
+    if test_run:
+        logecho( '!!! --test-run enabled: no data will be updated' )
 
     datasets = portal.action.package_search(q='update_type:automatic')
 
@@ -131,16 +133,29 @@ def update_dates(ctx):
     update_daily = ['real-time','15 minutes or less','hourly','monthly']
     update_after_second = ['daily']
     update_after_seventh = ['weekly']
+    update_quarterly = ['quarterly']
+    update_semi_annually = ['every 6 months']
+    update_annually = ['annually']
 
+    counter['datasets'] = 0
+    counter['updates'] = 0
+    counter['skips'] = 0
+    counter['failures'] = 0
     for dataset in datasets['results']:
-        logecho( '>> {}: {}: {}'.format( dataset['title'], 
+        counter['datasets'] += 1
+
+        logecho( '>>> {}: {}: {}'.format( dataset['title'], 
             dataset['update_type'], 
             dataset['update_frequency'] ) )
 
         if not 'date_range' in dataset or dataset['date_range'] == '':
-            logecho( '     > no date range, skipping' )
+            logecho( '      > no date range, skipping' )
+            counter['skips'] += 1
 
         elif ( dataset['update_frequency'] in update_daily ) \
+            or ( dataset['update_frequency'] in update_quarterly ) \
+            or ( dataset['update_frequency'] in update_semi_annually ) \
+            or ( dataset['update_frequency'] in update_annually ) \
             or ( dataset['update_frequency'] in update_after_second and dom > 2 ) \
             or ( dataset['update_frequency'] in update_after_seventh and dom > 7 ):
 
@@ -154,34 +169,65 @@ def update_dates(ctx):
                 # If we're in January, set the month to december, else set to now.month-1
                 new_to_month =  now.month - 1 if now.month > 1 else 12
                 new_to_date = datetime( new_to_year, new_to_month, 1, 0, 0 )
+
+            elif dataset['update_frequency'] == 'quarterly':
+                # If we're before April, decrement year by one, else use current year
+                new_to_year = now.year if now.month > 3 else now.year - 1
+                # If we're before April, set the month to now.month+12-3, else set to now.month-3
+                new_to_month =  now.month - 3 if now.month > 3 else now.month + 12 - 3
+                new_to_date = datetime( new_to_year, new_to_month, 1, 0, 0 )
+
+            elif dataset['update_frequency'] == 'every 6 months':
+                # If we're before July, decrement year by one, else use current year
+                new_to_year = now.year if now.month > 3 else now.year - 1
+                # If we're before July, set the month to now.month+12-6, else set to now.month-6
+                new_to_month =  now.month - 6 if now.month > 6 else now.month + 12 - 6
+                new_to_date = datetime( new_to_year, new_to_month, 1, 0, 0 )
+
+            elif dataset['update_frequency'] == 'annually':
+                new_to_year = now.year - 1
+                new_to_date = datetime( new_to_year, now.month, 1, 0, 0 )
+
             else:
                 new_to_date = now
                 
             new_drange = '{} - {}'.format( from_date.strftime('%m/%d/%Y'), new_to_date.strftime('%m/%d/%Y'))
-            logecho( '   > {} ==> {}'.format( dataset['date_range'], new_drange ), level='info' )
+            logecho( '    > {} ==> {}'.format( dataset['date_range'], new_drange ), level='info' )
 
             if new_drange == dataset['date_range']: 
-                logecho( '     > date already correct, skipping update' )
+                logecho( '      > date already correct, skipping update' )
+                counter['skips'] += 1
             elif from_date > new_to_date: 
-                logecho( '     > WARNING: from_date would be greater than to_date, skipping update' )
+                logecho( '      > WARNING: from_date would be greater than to_date, skipping update' )
+                counter['skips'] += 1
             else:
                 if test_run:
-                    logecho( '     > TEST RUN, updates not applied!' )
+                    logecho( '      > --test-run enabled, updates not applied!' )
                 else:
                     try:
                         results = portal.action.package_revise(
                             match = {'id': dataset['id']},
                             update = {'date_range': new_drange}
                         )
-                        logecho( '     > Update complete' )
+                        logecho( '      > Update complete' )
+                        counter['updates'] += 1
 
                     except NotAuthorized:
-                        print('denied')
+                        counter['failures'] += 1
+                        logecho( '      > Authorization failure: update not completed' )
         else:
-            logecho( '     > Not in need of update' )
+            logecho( '      > Not in need of update' )
+            counter['skips'] += 1
 
 
-    logecho('Dataset date updates complete.')
+    logecho('=== Dataset date updates complete')
+    if test_run:
+        logecho( '!!! --test-run enabled: no data was updated' )
+    click.echo('    {} dataset{} updated'.format( counter['updates'], 's' if counter['updates'] != 1 else '' ))
+    click.echo('    {} dataset{} skipped'.format( counter['skips'], 's' if counter['skips'] != 1 else '' ))
+    if counter['failures'] > 0:
+        click.echo('    {} dataset{} unauthorized'.format( counter['failures'], 's' if counter['failures'] != 1 else '' ))
+    click.echo('    {} dataset{} checked'.format( counter['datasets'], 's' if counter['datasets'] != 1 else '' ))
 
 
 if __name__ == '__main__':
