@@ -3,6 +3,7 @@ from colorama import Fore, Back, Style
 import click
 import click_config_file
 from ckanapi import RemoteCKAN
+from ckanapi import errors
 import json
 import sys
 import os
@@ -229,6 +230,58 @@ def update_dates(ctx):
         click.echo('    {} dataset{} unauthorized'.format( counter['failures'], 's' if counter['failures'] != 1 else '' ))
     click.echo('    {} dataset{} checked'.format( counter['datasets'], 's' if counter['datasets'] != 1 else '' ))
 
+
+@twdhcli.command()
+@click.argument('dataset_id')
+@click.pass_context
+def dataset_undelete(ctx, dataset_id):
+    """
+    Changes a deleted datasets status from 'deleted' to 'active'
+
+    """
+
+    logecho = ctx.obj['logecho']
+    test_run = ctx.obj['test_run']
+    portal = ctx.obj['portal']
+
+    logecho( 'Running dataset-undelete command for dataset with id "{}"... '.format( dataset_id) )
+
+    if test_run:
+        logecho( '!!! --test-run enabled: no data will be updated' )
+
+    try:
+        dataset = portal.action.package_show(id=dataset_id)
+
+    #except Exception as err:
+    except:
+        logecho( 'ERROR: Dataset with id "{}" not found'.format( dataset_id ) )
+        #print(f"Unexpected {err=}, {type(err)=}")
+        return False
+
+    #except:
+    #    logecho( 'ERROR: Dataset with id "{}" not found'.format( dataset_id ) )
+
+    # click.echo( dataset )
+
+
+    if test_run:
+        logecho( '> --test-run enabled, updates not applied!' )
+    else:
+        try:                
+            results = portal.action.package_revise(
+                match = {'id': dataset['id']},
+                update = {'state': 'active'}
+            )
+            logecho( 'Dataset with id "{}" set to state "active"'.format( dataset_id ) )
+
+        except Exception as err:
+            logecho( 'ERROR: Dataset update not completed' )
+            logecho(f"Unexpected {err=}, {type(err)=}")
+
+
+    
+    dataset = portal.action.package_show(id=dataset_id)
+    click.echo( dataset['state'] )
 
 if __name__ == '__main__':
     twdhcli(obj={},auto_envvar_prefix='TWDHCLI')
