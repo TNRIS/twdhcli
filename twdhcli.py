@@ -114,7 +114,7 @@ def twdhcli(ctx, host, apikey, test_run, verbose, debug, logfile):
 @click.pass_context
 def update_dates(ctx):
     """
-    Update dates on datasets where update_type == 'automatic'
+    Update dates on datasets 'update_type' of 'automatic'
     """
 
     logecho = ctx.obj['logecho']
@@ -236,7 +236,7 @@ def update_dates(ctx):
 @click.pass_context
 def dataset_undelete(ctx, dataset_id):
     """
-    Changes a deleted datasets status from 'deleted' to 'active'
+    Changes a dataset status from 'deleted' to 'active'
 
     """
 
