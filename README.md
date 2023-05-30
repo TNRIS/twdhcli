@@ -17,7 +17,7 @@ Linux, Mac, Windows Powershell:
 python3 -m venv twdhclienv
 . twdhclienv/bin/activate
 cd twdhclienv
-git clone https://github.com/twdbben/twdhcli.git
+git clone git@github.com:twdbben/twdhcli.git
 cd twdhcli
 pip install -r requirements.txt
 ```
@@ -27,7 +27,7 @@ Windows CMD:
 python3 -m venv twdhclienv
 twdhclivenv\Scripts\activate
 cd twdhclienv
-git clone https://github.com/dathere/twdhcli.git
+git clone git@github.com:twdbben/twdhcli.git
 cd twdhcli
 pip install -r requirements.txt
 ```
