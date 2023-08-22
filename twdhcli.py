@@ -38,8 +38,8 @@ def setup_logger(name, log_file, level=logging.INFO):
               required=True,
               help='TWDH CKAN host.')
 @click.option('--apikey',
-              required=True,
-              help='TWDH CKAN api key to use.')
+              required=False,
+              help='TWDH CKAN api key to use if authentication is required.')
 @click.option('--test-run',
               is_flag=True,
               help='Show what would change but don\'t make any changes.')
@@ -109,6 +109,170 @@ def twdhcli(ctx, host, apikey, test_run, verbose, debug, logfile):
 
     #logecho('Ending twdhcli...')
 
+
+@twdhcli.command()
+@click.option('--filename',
+              required=True,
+              type=click.Path(),
+              default='./taglist.json',
+              help='Filename to save tag JSON into.')
+
+@click.pass_context
+def fetch_tags(ctx, filename):
+    """
+    Fetch tag values
+    """
+
+    logecho = ctx.obj['logecho']
+    test_run = ctx.obj['test_run']
+    portal = ctx.obj['portal']
+
+    logecho( 'Fetching tag values ... ' )
+
+    query = portal.action.package_search(q='*:*', rows=1000)
+
+    counter['datasets'] = 0
+    counter['updates'] = 0
+    counter['skips'] = 0
+    counter['failures'] = 0
+
+    tags = []
+
+    for dataset in query['results']:
+       
+        logecho( '>>> {}'.format( dataset['title'] ) )
+        logecho( '  > {}'.format( dataset['name'] ) )
+
+        if 'primary_tags' in dataset:
+            logecho( '  > {}'.format( dataset['primary_tags'] ) )
+        else:
+            dataset['primary_tags'] = []
+
+        if 'secondary_tags' in dataset:
+            logecho( '  > {}'.format( dataset['secondary_tags'] ) )
+        else:
+            dataset['secondary_tags'] = []
+
+        if 'tags' in dataset:
+            logecho( '  > {}'.format( dataset['tags'] ) )
+        else:
+            dataset['tags'] = []
+
+
+        taginfo = {}
+        taginfo['dataset'] = dataset['name']
+        taginfo['primary_tags'] = dataset['primary_tags']
+        taginfo['secondary_tags'] = dataset['secondary_tags']
+
+        taginfo['tags'] = []
+        for tag in dataset['tags']:
+            taginfo['tags'].append( tag['name'] )
+       
+        tags.append( taginfo )
+
+        counter['datasets'] += 1
+
+    with open(filename, 'w') as fp:
+        json.dump(tags, fp)
+
+
+    logecho('=== Tag fetch complete')
+    if counter['failures'] > 0:
+        click.echo('    {} dataset{} unauthorized'.format( counter['failures'], 's' if counter['failures'] != 1 else '' ))
+    click.echo('    Tags for {} dataset{} fetched'.format( counter['datasets'], 's' if counter['datasets'] != 1 else '' ))
+
+@twdhcli.command()
+@click.argument('tags_json')
+@click.pass_context
+def update_tags(ctx, tags_json):
+    """
+    Update tags using data in tags_json 
+    """
+
+    logecho = ctx.obj['logecho']
+    test_run = ctx.obj['test_run']
+    portal = ctx.obj['portal']
+
+    logecho( 'Running update-tags command ... ' )
+
+    if test_run:
+        logecho( '!!! --test-run enabled: no data will be updated' )
+
+    f = open( tags_json )
+    tags = json.load(f)
+
+    counter['datasets'] = 0
+    counter['updates'] = 0
+    counter['skips'] = 0
+    counter['failures'] = 0
+
+    for dataset_tags in tags['datasets']:
+
+        dataset = portal.action.package_show(id='{}'.format( dataset_tags['name'] ) )
+
+        counter['datasets'] += 1
+
+        logecho( '>>> {}'.format( dataset['title'] ) )
+        logecho( '  > {}'.format( dataset['name'] ) )
+        if 'primary_tags' in dataset_tags:
+            logecho( '  > {}'.format( dataset_tags['primary_tags'] ) )
+        else:
+            dataset_tags['primary_tags'] = []
+            logecho( '  > NO primary_tags FIELD PRESENT!' )
+        if 'secondary_tags' in dataset_tags:
+            logecho( '  > {}'.format( dataset_tags['secondary_tags'] ) )
+        else:
+            dataset_tags['secondary_tags'] = []
+            logecho( '  > NO primary_tags FIELD PRESENT!' )
+
+        dataset_tags['tags'] = dataset_tags['primary_tags'] + dataset_tags['secondary_tags'] 
+        logecho( '  > {}'.format( dataset_tags['tags'] ) )
+
+        if test_run:
+            logecho( '      > --test-run enabled, updates not applied!' )
+        else:
+            try:
+                """
+                results = portal.action.package_revise(
+                    match = {'id': dataset['id']},
+                    update = { 
+                        'primary_tags': dataset_tags['primary_tags'] ,
+                        'secondary_tags': dataset_tags['secondary_tags'] 
+                    }
+                )
+                """
+                my_dict = {
+                    'primary_tags': dataset_tags['primary_tags'],
+                    'secondary_tags': dataset_tags['secondary_tags'],
+                    'tag_string': 'hello, world',
+                }
+                portal.action.package_patch(
+                    id=dataset['id'],
+                    data_dict=my_dict
+                )
+                """
+                dataset['primary_tags']: dataset_tags['primary_tags']
+                dataset['secondary_tags']: dataset_tags['secondary_tags'] 
+                portal.action.package_patch(
+                    id=dataset['id'],
+                    data_dict=dataset
+                )
+                """
+                logecho( '      > Update complete' )
+                counter['updates'] += 1
+            except Exception as e:
+                counter['failures'] += 1
+                logecho( '      > Authorization failure: update not completed' )
+                logecho( e )
+
+    logecho('=== Dataset tag updates complete')
+    if test_run:
+        logecho( '!!! --test-run enabled: no data was updated' )
+    click.echo('    {} dataset{} updated'.format( counter['updates'], 's' if counter['updates'] != 1 else '' ))
+    click.echo('    {} dataset{} skipped'.format( counter['skips'], 's' if counter['skips'] != 1 else '' ))
+    if counter['failures'] > 0:
+        click.echo('    {} dataset{} unauthorized'.format( counter['failures'], 's' if counter['failures'] != 1 else '' ))
+    click.echo('    {} dataset{} checked'.format( counter['datasets'], 's' if counter['datasets'] != 1 else '' ))
 
 @twdhcli.command()
 @click.pass_context
