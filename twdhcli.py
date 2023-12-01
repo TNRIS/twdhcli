@@ -447,5 +447,89 @@ def dataset_undelete(ctx, dataset_id):
     dataset = portal.action.package_show(id=dataset_id)
     click.echo( dataset['state'] )
 
+
+@twdhcli.command()
+@click.argument('json_file')
+@click.pass_context
+def update_rolling_dates(ctx, json_file):
+    """
+    Update rolling dates using data in json_file 
+
+    This still needs a lot ow polishing
+    """
+
+    logecho = ctx.obj['logecho']
+    test_run = ctx.obj['test_run']
+    portal = ctx.obj['portal']
+
+    logecho( 'Running update-rolling-dates command ... ' )
+
+    if test_run:
+        logecho( '!!! --test-run enabled: no data will be updated' )
+
+    f = open( json_file )
+    dates = json.load(f)
+
+    counter['datasets'] = 0
+    counter['updates'] = 0
+    counter['skips'] = 0
+    counter['not-found'] = 0
+    counter['failures'] = 0
+
+    for updates in dates['datasets']:
+
+        try:
+            dataset = portal.action.package_show(id='{}'.format( updates['name'] ) )
+
+        except Exception as e:
+            counter['not-found'] += 1
+            logecho( e )
+            logecho( '      > Dataset not found: {}'.format( updates['name'] ) )
+            continue
+
+        counter['datasets'] += 1
+
+        logecho( '>>> {} - {} )'.format( dataset['title'], dataset['name'] ) )
+
+        if test_run:
+            logecho( '      > --test-run enabled, updates not applied!' )
+        else:
+
+            try:
+
+                from_date = datetime.strptime( updates['from_date'], '%Y-%m-%d %H:%M:%S')
+                to_date = datetime.strptime( updates['to_date'], '%Y-%m-%d %H:%M:%S')
+                new_drange = '{} - {}'.format( from_date.strftime('%m/%d/%Y'), to_date.strftime('%m/%d/%Y'))
+
+                results = portal.action.package_revise(
+                    match = {'id': dataset['id']},
+                    update = {
+                        'date_range': new_drange,
+                        'from_date': updates['from_date'],
+                        'to_date': updates['to_date']
+                    }
+                )
+
+                logecho( '      > Update complete' )
+                counter['updates'] += 1
+
+            except Exception as e:
+                counter['failures'] += 1
+                logecho( '      > Authorization failure: update not completed' )
+                logecho( e )
+
+    logecho('=== Dataset rolling date updates complete')
+    if test_run:
+        logecho( '!!! --test-run enabled: no data was updated' )
+    click.echo('    {} dataset{} updated'.format( counter['updates'], 's' if counter['updates'] != 1 else '' ))
+    click.echo('    {} dataset{} skipped'.format( counter['skips'], 's' if counter['skips'] != 1 else '' ))
+    if counter['failures'] > 0:
+        click.echo('    {} dataset{} unauthorized'.format( counter['failures'], 's' if counter['failures'] != 1 else '' ))
+    if counter['not-found'] > 0:
+        click.echo('    {} dataset{} not found'.format( counter['failures'], 's' if counter['failures'] != 1 else '' ))
+
+
+
+
 if __name__ == '__main__':
     twdhcli(obj={},auto_envvar_prefix='TWDHCLI')
