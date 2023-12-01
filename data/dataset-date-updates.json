@@ -1,0 +1,136 @@
+{
+  "datasets": [
+
+    {
+      "name": "fort-worth-district-lake-summary",
+      "from_date": "2023-12-01 00:00:00",
+      "to_date": "2023-12-01 00:00:00"
+    },
+    {
+      "name": "time-series-report-for-aquilla-lake",
+      "from_date": "2022-12-01 00:00:00",
+      "to_date": "2023-12-01 00:00:00"
+    },
+    {
+      "name": "time-series-report-for-b-a-steinhagen-lake",
+      "from_date": "2022-12-01 00:00:00",
+      "to_date": "2023-12-01 00:00:00"
+    },
+    {
+      "name": "time-series-report-for-bardwell-lake",
+      "from_date": "2022-12-01 00:00:00",
+      "to_date": "2023-12-01 00:00:00"
+    },
+    {
+      "name": "time-series-report-for-belton-lake",
+      "from_date": "2022-12-01 00:00:00",
+      "to_date": "2023-12-01 00:00:00"
+    },
+    {
+      "name": "time-series-report-for-benbrook-lake",
+      "from_date": "2022-12-01 00:00:00",
+      "to_date": "2023-12-01 00:00:00"
+    },
+    {
+      "name": "time-series-report-for-canyon-lake",
+      "from_date": "2022-12-01 00:00:00",
+      "to_date": "2023-12-01 00:00:00"
+    },
+    {
+      "name": "time-series-report-for-granger-lake",
+      "from_date": "2022-12-01 00:00:00",
+      "to_date": "2023-12-01 00:00:00"
+    },
+    {
+      "name": "time-series-report-for-grapevine-lake",
+      "from_date": "2022-12-01 00:00:00",
+      "to_date": "2023-12-01 00:00:00"
+    },
+    {
+      "name": "time-series-report-for-hords-creek-lake",
+      "from_date": "2022-12-01 00:00:00",
+      "to_date": "2023-12-01 00:00:00"
+    },
+    {
+      "name": "time-series-report-for-jim-chapman-lake",
+      "from_date": "2022-12-01 00:00:00",
+      "to_date": "2023-12-01 00:00:00"
+    },
+    {
+      "name": "time-series-report-for-joe-pool-lake",
+      "from_date": "2022-12-01 00:00:00",
+      "to_date": "2023-12-01 00:00:00"
+    },
+    {
+      "name": "time-series-report-for-lake-georgetown",
+      "from_date": "2022-12-01 00:00:00",
+      "to_date": "2023-12-01 00:00:00"
+    },
+    {
+      "name": "time-series-report-for-lake-o-the-pines",
+      "from_date": "2022-12-01 00:00:00",
+      "to_date": "2023-12-01 00:00:00"
+    },
+    {
+      "name": "time-series-report-for-lavon-lake",
+      "from_date": "2022-12-01 00:00:00",
+      "to_date": "2023-12-01 00:00:00"
+    },
+    {
+      "name": "time-series-report-for-lewisville-lake",
+      "from_date": "2022-12-01 00:00:00",
+      "to_date": "2023-12-01 00:00:00"
+    },
+    {
+      "name": "time-series-report-for-navarro-mills-lake",
+      "from_date": "2022-12-01 00:00:00",
+      "to_date": "2023-12-01 00:00:00"
+    },
+    {
+      "name": "time-series-report-for-oc-fisher-lake",
+      "from_date": "2022-12-01 00:00:00",
+      "to_date": "2023-12-01 00:00:00"
+    },
+    {
+      "name": "time-series-report-for-proctor-lake",
+      "from_date": "2022-12-01 00:00:00",
+      "to_date": "2023-12-01 00:00:00"
+    },
+    {
+      "name": "time-series-report-for-ray-roberts-lake",
+      "from_date": "2022-12-01 00:00:00",
+      "to_date": "2023-12-01 00:00:00"
+    },
+    {
+      "name": "time-series-report-for-sam-rayburn-reservoir",
+      "from_date": "2022-12-01 00:00:00",
+      "to_date": "2023-12-01 00:00:00"
+    },
+    {
+      "name": "time-series-report-for-somerville-lake",
+      "from_date": "2022-12-01 00:00:00",
+      "to_date": "2023-12-01 00:00:00"
+    },
+    {
+      "name": "time-series-report-for-stillhouse-hollow-lake",
+      "from_date": "2022-12-01 00:00:00",
+      "to_date": "2023-12-01 00:00:00"
+    },
+    {
+      "name": "time-series-report-for-waco-lake",
+      "from_date": "2022-12-01 00:00:00",
+      "to_date": "2023-12-01 00:00:00"
+    },
+    {
+      "name": "time-series-report-for-whitney-lake",
+      "from_date": "2022-12-01 00:00:00",
+      "to_date": "2023-12-01 00:00:00"
+    },
+    {
+      "name": "time-series-report-for-wright-patman-lake",
+      "from_date": "2022-12-01 00:00:00",
+     "to_date": "2023-12-01 00:00:00"
+    }
+
+  ]
+}
