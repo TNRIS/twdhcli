@@ -31,7 +31,7 @@ Linux, Mac, Windows Powershell:
 cd /usr/lib/ckan
 . twdhclienv/bin/activate
 cd twdhclienv/twdhcli
-python twdhcli.py --config twdhcli.ini
+python twdhcli.py --config ckan.ini
 ```
 
 Command line parameters:
