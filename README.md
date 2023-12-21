@@ -14,18 +14,9 @@ Installation:
 
 Linux, Mac, Windows Powershell:
 ```
+cd /usr/lib/ckan
 python3 -m venv twdhclienv
 . twdhclienv/bin/activate
-cd twdhclienv
-git clone git@github.com:twdbben/twdhcli.git
-cd twdhcli
-pip install -r requirements.txt
-```
-
-Windows CMD:
-```
-python3 -m venv twdhclienv
-twdhclivenv\Scripts\activate
 cd twdhclienv
 git clone git@github.com:twdbben/twdhcli.git
 cd twdhcli
@@ -37,15 +28,9 @@ Usage:
 
 Linux, Mac, Windows Powershell:
 ```
+cd /usr/lib/ckan
 . twdhclienv/bin/activate
 cd twdhclienv/twdhcli
-python twdhcli.py --config twdhcli.ini
-```
-
-Windows CMD:
-```
-twdhclienv\Scripts\activate
-cd twdhclienv\twdhcli
 python twdhcli.py --config twdhcli.ini
 ```
 
