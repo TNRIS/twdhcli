@@ -8,7 +8,7 @@ import json
 import sys
 import os
 import glob
-from datetime import datetime
+from datetime import datetime, date
 from time import perf_counter
 import shutil
 import dateparser
@@ -109,6 +109,75 @@ def twdhcli(ctx, host, apikey, test_run, verbose, debug, logfile):
     ctx.obj['host'] = host
 
     #logecho('Ending twdhcli...')
+
+
+@twdhcli.command()
+@click.option('--filename',
+              required=True,
+              type=click.Path(),
+              default='./data-dictionary-list-{}.json'.format( date.today().strftime('%Y-%m-%d') ),
+              help='Filename to save data dictionary JSON into.')
+
+@click.pass_context
+def fetch_data_dictionaries(ctx, filename):
+    """
+    Fetch data dictionaries
+    """
+
+    logecho = ctx.obj['logecho']
+    test_run = ctx.obj['test_run']
+    portal = ctx.obj['portal']
+    host = ctx.obj['host']
+
+    click.echo('-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-')
+    click.echo( 'Fetching data dictionaries from {} '.format( host ) )
+    click.echo('-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-')
+
+    query = portal.action.package_search(q='type:dataset', rows=1000)
+
+    counter['datasets'] = 0
+    counter['data-dictionaries'] = 0
+
+    dds = []
+
+    for dataset in query['results']:
+       
+
+        resources = dataset.get( 'resources' )
+
+        # If the first resource has a DP+ created DD, use it
+        if len( resources ) > 0 and resources[0].get( 'datastore_active', False ):
+            logecho( '> {}'.format( dataset['title'], dataset['name'] ) )
+            logecho( '  {}/dataset/{}'.format( host, dataset['name'] ) )
+            logecho( '   {}'.format( resources[0].get('id') ) )
+
+            resource = portal.action.datastore_search(resource_id=resources[0].get('id'))
+
+            dd = {}
+            dd['dataset'] = dataset['name'];
+            dd['dataset_url'] = '{host}/dataset/{name}'.format( host=host, name=dataset['name'] )
+            dd['resource_id'] = resource['resource_id'];
+            dd['data_dictionary_edit_url'] = '{host}/dataset/{name}/dictionary/{id}'.format( host=host, name=dataset['name'], id=resource['resource_id'] )
+
+            dd['fields'] = resource['fields'];
+            dds.append( dd )
+
+            counter['data-dictionaries'] += 1
+
+        dict = {}
+        dict['data-dictionaries'] = dds
+        try:
+            file = open(filename,mode='w')
+            json.dump(dict, file, indent = 4)
+        finally:
+            file.close()
+
+        counter['datasets'] += 1
+
+    click.echo('-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-')
+    click.echo('{} dataset{} checked for DP+ data dictionaries'.format( counter['data-dictionaries'], 's' if counter['data-dictionaries'] != 1 else '' ))
+    click.echo('DP+ Data Dictionaries fetched for {} resource{} and output to file {}'.format( counter['data-dictionaries'], 's' if counter['data-dictionaries'] != 1 else '', filename ))
+    click.echo('-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-')
 
 
 @twdhcli.command()
@@ -489,7 +558,7 @@ def update_rolling_dates(ctx, json_file):
 
         counter['datasets'] += 1
 
-        logecho( '>>> {} - {} )'.format( dataset['title'], dataset['name'] ) )
+        logecho( '>>> {} - {}'.format( dataset['title'], dataset['name'] ) )
 
         if test_run:
             logecho( '      > --test-run enabled, updates not applied!' )
@@ -506,7 +575,8 @@ def update_rolling_dates(ctx, json_file):
                     update = {
                         'date_range': new_drange,
                         'from_date': updates['from_date'],
-                        'to_date': updates['to_date']
+                        'to_date': updates['to_date'],
+                        'end_date': ''
                     }
                 )
 
