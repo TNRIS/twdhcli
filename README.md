@@ -18,7 +18,7 @@ cd /usr/lib/ckan
 python3 -m venv twdhclienv
 . twdhclienv/bin/activate
 cd twdhclienv
-git clone git@github.com:twdbben/twdhcli.git
+git clone git@github.com:TNRIS/twdhcli.git
 cd twdhcli
 pip install -r requirements.txt
 ```
