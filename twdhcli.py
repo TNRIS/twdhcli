@@ -565,10 +565,9 @@ def update_rolling_dates(ctx, json_file):
         else:
 
             try:
-
-                from_date = datetime.strptime( updates['from_date'], '%Y-%m-%d %H:%M:%S')
-                to_date = datetime.strptime( updates['to_date'], '%Y-%m-%d %H:%M:%S')
-                new_drange = '{} - {}'.format( from_date.strftime('%m/%d/%Y'), to_date.strftime('%m/%d/%Y'))
+                from_date = datetime.strptime( updates['from_date'], '%Y-%m-%d')
+                to_date = datetime.strptime( updates['to_date'], '%Y-%m-%d')
+                new_drange = '{} - {}'.format( from_date.strftime('%Y-%m-%d'), to_date.strftime('%Y-%m-%d'))
 
                 results = portal.action.package_revise(
                     match = {'id': dataset['id']},
