@@ -2,3 +2,4 @@
 *.csv
 Docker/.env
 tmp
+.env
