@@ -22,6 +22,13 @@ FORMAT = '%(message)s'
 version = '0.1'
 formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
 
+def get_patch_functions():
+    return  {
+        'example': patch_fn_example,
+        'clear_data_dictionary': patch_fn_clear_data_dictionary,
+        'set_title': patch_fn_set_title,
+    }
+
 def setup_logger(name, log_file, level=logging.INFO):
     """To setup as many loggers as you want"""
 
@@ -132,9 +139,9 @@ def twdhcli(ctx, host, apikey, test_run, quiet, debug, logfile):
               default=None,
               help='list of dataset ids to show')
 @click.pass_context
-def show_packages(ctx,ids):
+def show_datasets(ctx,ids):
     """
-    Show packages
+    Show datasets
     """
 
     twdh = ctx.obj['twdh']
@@ -146,6 +153,68 @@ def show_packages(ctx,ids):
         logecho("{}: {}".format(dataset["name"], str(dataset)), 'info')
 
 
+
+@twdhcli.command()
+@click.option('--ids',
+              required=False,
+              default=None,
+              help='list of dataset ids to show')
+@click.pass_context
+def show_applications(ctx,ids):
+    """
+    Show applications
+    """
+
+    twdh = ctx.obj['twdh']
+    logecho = ctx.obj['logecho']
+
+    datasets = fetch_datasets(ctx, ids, 'application')
+
+    for dataset in datasets:
+        logecho("{}: {}".format(dataset["name"], str(dataset)), 'info')
+
+
+@twdhcli.command()
+@click.option('--ids',
+              required=False,
+              default=None,
+              help='list of dataset ids to show')
+@click.pass_context
+def list_datasets(ctx,ids):
+    """
+    List datasets
+    """
+
+    twdh = ctx.obj['twdh']
+    logecho = ctx.obj['logecho']
+
+    datasets = fetch_datasets(ctx, ids)
+
+    for dataset in datasets:
+        logecho(dataset["name"], 'info')
+
+
+
+@twdhcli.command()
+@click.option('--ids',
+              required=False,
+              default=None,
+              help='list of dataset ids to show')
+@click.pass_context
+def list_applications(ctx,ids):
+    """
+    List applications
+    """
+
+    twdh = ctx.obj['twdh']
+    logecho = ctx.obj['logecho']
+
+    datasets = fetch_datasets(ctx, ids, 'application')
+
+    for dataset in datasets:
+        logecho(dataset["name"], 'info')
+
+
 @twdhcli.command()
 @click.option('--ids',
               required=False,
@@ -154,7 +223,7 @@ def show_packages(ctx,ids):
 @click.pass_context
 def spatial_stats(ctx,ids):
     """
-    Show spatial stats of packages
+    Show spatial stats of datasets
     """
 
     twdh = ctx.obj['twdh']
@@ -202,15 +271,24 @@ def spatial_stats(ctx,ids):
     logecho("  simplification reduction = {}%".format( 100 - ( ( spatial_simp_total / spatial_full_total ) * 100 ) ), "info")
     
 @twdhcli.command()
+@click.option('--patch-fn',
+              required=True,
+              default=None,
+              help='patch function to apply')
 @click.option('--ids',
               required=False,
               default=None,
               help='list of dataset ids to patch')
-@click.option('--patch_data',
-              required=True,
-              help='json containing attributes to patch')
+@click.option('--patch-data',
+              required=False,
+              default=None,
+              help='JSON blob containing patch values')
+@click.option('--confirm-each',
+              default=False,
+              is_flag=True,
+              help='Confirm each patch operation instead of just once at the start')
 @click.pass_context
-def patch_datasets(ctx, ids, patch_data):
+def patch_datasets(ctx, patch_fn, ids, patch_data, confirm_each):
     """
     Patch datasets
     """
@@ -219,29 +297,81 @@ def patch_datasets(ctx, ids, patch_data):
     logecho = ctx.obj['logecho']
     test_run = ctx.obj['test_run']
 
+    patch_fn_dict = get_patch_functions()
+
+    if patch_fn not in patch_fn_dict:
+        logecho( "Patch function does not exist: {}".format(patch_fn), "info" )
+        return
+
+
     datasets = fetch_datasets(ctx, ids)
 
-    try:
-        data = json.loads(patch_data)
-    except Exception as e:
-        log.warning(f"    > patch_data parse error: {e}")
-        exit(1)
+    # Confirm patch operation
+    if ids:
+        logecho( "+ Prepared to patch the following datasets", 'warning')
+        for dataset in datasets:
+            logecho( "  - {} ({})".format(dataset.get("title"),dataset.get("id")), 'info')
+        if not confirm_each:
+            if click.confirm('Proceed with all patches?', abort=True):
+                logecho( "  Proceeding with patches ...", "info" )
+            else: 
+                logecho( "  Operation cancelled", "warning" )
+    else:
+        if not confirm_each:
+            if click.confirm('+ No datasets specified. Proceed with patching all {} datasets?'.format(len(datasets))):
+                logecho( "  Proceeding with patches ...", "info" )
+            else: 
+                logecho( "  Operation cancelled", "warning" )
+                return
+
+    if patch_data:
+        try:
+            data_dict = json.loads(patch_data)
+        except json.JSONDecodeError:
+            print("Error: Could not decode JSON '{}'".format(patch_data))
+            return False
+        except Exception as e:
+            print("An unexpected error occurred: {}".format(e))
+            return False
+    else:
+        data_dict = {}
+
+    print( data_dict )
+    #return
 
     for dataset in datasets:
-        
-        data["id"] = dataset.get("id")
-        print( data )
+        logecho( "+ About to patch {} ({})".format(dataset.get("title"),dataset.get("id")), 'info')
+        if confirm_each:
+            if click.confirm('  Proceed with patch?'):
+                logecho( "    Proceeding with patch ...", "info" )
+            else: 
+                logecho( "    Patch cancelled", "warning" )
+                continue
         try:
-            logecho( "Updating {} with {}".format( dataset.get("id"), patch_data ), 'warning')
-            patch = twdh.action.package_patch( id=dataset.get("id"), data_dict=patch_data )
-            #patch = twdh.action.package_patch( id=dataset.get("id"), extras=[], data_admin_approved="approved" )
-            #patch = twdh.action.package_patch( id=dataset.get("id"), extras=[], patch="BAZZZZZ", data_admin_approved="approved" )
-            logecho( str(patch['title']) )
+            logecho( "    ... patching {} ({})".format(dataset.get("title"),dataset.get("id")), 'info')
+            # Run patch function
+            patch_fn_dict[patch_fn](twdh,dataset,data_dict)
+            logecho( "    ...... patched {} ({})".format(dataset.get("title"),dataset.get("id")), 'info')
+
         except Exception as e:
             print( e )
 
 
-def fetch_datasets(ctx,ids=None):
+def patch_fn_example():
+    print('This is an example patch function')
+    #patch = twdh.action.package_patch( id=dataset.get("id") )
+    #patch = twdh.action.package_patch( id=dataset.get("id"), extras=[], data_admin_approved="approved" )
+    #patch = twdh.action.package_patch( id=dataset.get("id"), data_admin_approved="approved", end_date="", group=["water-use"] )
+    #patch = twdh.action.package_patch( id=dataset.get("id"), gazetteer= { "spatial_simp": "", "spatial_full": "", "place_keywords": "El Paso (City), Austin (City), Austin (County), ABCDEFGH" })
+
+
+def patch_fn_clear_data_dictionary(remote,dataset,data):
+    patch = remote.action.package_patch( id=dataset.get("id"), data_dictionary="" )
+
+def patch_fn_set_title(remote,dataset,data):
+    patch = remote.action.package_patch( id=dataset.get("id"), title=data['title'] )
+
+def fetch_datasets(ctx,ids=None,package_type='dataset'):
 
     twdh = ctx.obj['twdh']
     logecho = ctx.obj['logecho']
@@ -267,7 +397,9 @@ def fetch_datasets(ctx,ids=None):
     else:
             query = twdh.action.package_search(
                 rows=100000,
-                fq="type:dataset"
+                fq="type:{}".format(package_type),
+                include_drafts=True,
+                include_private=True
             )
             if query["count"] == 0:
                 logecho( "No datasets found", 'error')
@@ -988,6 +1120,11 @@ def restore_resources(ctx):
     return
 
     """
+
+def empty_data_dictionary():
+    print('hello')
+
+
 
 if __name__ == '__main__':
     twdhcli(obj={},auto_envvar_prefix='TWDHCLI')
