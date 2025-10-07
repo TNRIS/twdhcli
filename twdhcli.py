@@ -1121,10 +1121,5 @@ def restore_resources(ctx):
 
     """
 
-def empty_data_dictionary():
-    print('hello')
-
-
-
 if __name__ == '__main__':
     twdhcli(obj={},auto_envvar_prefix='TWDHCLI')
