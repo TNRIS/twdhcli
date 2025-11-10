@@ -27,6 +27,7 @@ def get_patch_functions():
         'example': patch_fn_example,
         'clear_data_dictionary': patch_fn_clear_data_dictionary,
         'set_title': patch_fn_set_title,
+        'set_app_email': patch_fn_set_app_email,
     }
 
 def setup_logger(name, log_file, level=logging.INFO):
@@ -283,12 +284,16 @@ def spatial_stats(ctx,ids):
               required=False,
               default=None,
               help='JSON blob containing patch values')
+@click.option('--dataset-type',
+              required=False,
+              default="dataset",
+              help='dataset or application')
 @click.option('--confirm-each',
               default=False,
               is_flag=True,
               help='Confirm each patch operation instead of just once at the start')
 @click.pass_context
-def patch_datasets(ctx, patch_fn, ids, patch_data, confirm_each):
+def patch_datasets(ctx, patch_fn, ids, patch_data, dataset_type, confirm_each):
     """
     Patch datasets
     """
@@ -303,8 +308,7 @@ def patch_datasets(ctx, patch_fn, ids, patch_data, confirm_each):
         logecho( "Patch function does not exist: {}".format(patch_fn), "info" )
         return
 
-
-    datasets = fetch_datasets(ctx, ids)
+    datasets = fetch_datasets(ctx, ids, dataset_type)
 
     # Confirm patch operation
     if ids:
@@ -318,7 +322,7 @@ def patch_datasets(ctx, patch_fn, ids, patch_data, confirm_each):
                 logecho( "  Operation cancelled", "warning" )
     else:
         if not confirm_each:
-            if click.confirm('+ No datasets specified. Proceed with patching all {} datasets?'.format(len(datasets))):
+            if click.confirm('+ No datasets specified. Proceed with patching all {} {}s?'.format(len(datasets), dataset_type)):
                 logecho( "  Proceeding with patches ...", "info" )
             else: 
                 logecho( "  Operation cancelled", "warning" )
@@ -371,15 +375,18 @@ def patch_fn_clear_data_dictionary(remote,dataset,data):
 def patch_fn_set_title(remote,dataset,data):
     patch = remote.action.package_patch( id=dataset.get("id"), title=data['title'] )
 
+def patch_fn_set_app_email(remote,dataset,data):
+    patch = remote.action.package_patch( id=dataset.get("id"), data_contact_email=data['email'] )
+
 def fetch_datasets(ctx,ids=None,package_type='dataset'):
 
     twdh = ctx.obj['twdh']
     logecho = ctx.obj['logecho']
 
     if ids:
-        logecho( 'Fetching datasets: {}'.format(ids) )
+        logecho('Fetching {}s: {}'.format(package_type,ids) )
     else:
-        logecho( 'Fetching all datasets' )
+        logecho('Fetching all {}s'.format(package_type))
     datasets = []
 
     if ids:
