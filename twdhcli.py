@@ -153,6 +153,29 @@ def show_datasets(ctx,ids):
     for dataset in datasets:
         logecho("{}: {}".format(dataset["name"], str(dataset)), 'info')
 
+@twdhcli.command()
+@click.option('--ids',
+              required=False,
+              default=None,
+              help='list of unapproved public active datasets')
+@click.pass_context
+def get_unapproved_public_active_datasets(ctx,ids):
+    """
+    Show unapproved public active datasets
+    """
+
+    twdh = ctx.obj['twdh']
+    logecho = ctx.obj['logecho']
+
+
+    results = twdh.action.package_search(
+        fq_list=[
+            'data_admin_approved:unapproved',
+            'state:active',
+            'private:false'
+        ]
+    )
+    print(results)
 
 
 @twdhcli.command()
