@@ -28,6 +28,9 @@ def get_patch_functions():
         'clear_data_dictionary': patch_fn_clear_data_dictionary,
         'set_title': patch_fn_set_title,
         'set_app_email': patch_fn_set_app_email,
+        'clear_spatial_data': patch_fn_clear_spatial_data,
+        'set_spatial_data': patch_fn_set_spatial_data,
+
     }
 
 def setup_logger(name, log_file, level=logging.INFO):
@@ -83,21 +86,35 @@ def twdhcli(ctx, host, apikey, test_run, quiet, debug, logfile):
         """helper for logging to file and console"""
         if level == 'error':
             logger.error(message)
-            click.echo(Fore.RED + level.upper() + ': ' + Fore.WHITE +
+            click.echo(Fore.RED + '🔴' + Fore.WHITE +
                        message, err=True) if not quiet else True
         elif level == 'warning':
             logger.warning(message)
-            click.echo(Fore.YELLOW + level.upper() + ': ' +
+            click.echo(Fore.YELLOW + '🟡 ' +
                        Fore.WHITE + message) if not quiet else True
         elif level == 'debug':
             logger.debug(message)
-            click.echo(Fore.GREEN + level.upper() + ': ' +
+            click.echo('🟢🟢 ' +
                        Fore.WHITE + message) if debug else False
+        elif level == 'note':
+            logger.debug(message)
+            click.echo('🟢 ' +
+                       Fore.GREEN + message)
+        elif level == 'detail':
+            logger.debug(message)
+            click.echo('🔵 ' +
+                       Fore.BLUE + message)
+        elif level == 'info':
+            logger.debug(message)
+            click.echo('⚪️ ' + Fore.WHITE + message)
+        elif level == 'divider':
+            logger.debug(message)
+            click.echo(Fore.MAGENTA + message)
         else:
             logger.info(message)
             click.echo(Fore.GREEN + message)
 
-    logecho('Starting twdhcli/%s ...' % version)
+    logecho('Starting twdhcli/%s ...' % version, 'detail')
 
     if not os.path.exists("./.env"):
         logecho('.env file not found', level='warning')
@@ -110,7 +127,7 @@ def twdhcli(ctx, host, apikey, test_run, quiet, debug, logfile):
         if apikey == None:
             logecho("Cannot continue: --apikey parameter not set and APIKEY not found in .env.secrets","error")
             exit(1)
-    logecho("apikey set")
+    logecho("apikey set", "detail")
 
     if host == None:
         # host not passed as a parameter, check config
@@ -127,7 +144,7 @@ def twdhcli(ctx, host, apikey, test_run, quiet, debug, logfile):
         logecho('Cannot connect to host %s' % host, level='error')
         sys.exit()
     else:
-        logecho('Connected to host %s' % host)
+        logecho('Connected to host %s' % host, "detail")
 
     ctx.obj['twdh'] = twdh
     ctx.obj['logecho'] = logecho
@@ -363,7 +380,7 @@ def patch_datasets(ctx, patch_fn, ids, patch_data, dataset_type, confirm_each):
     else:
         data_dict = {}
 
-    print( data_dict )
+    #print( data_dict )
     #return
 
     for dataset in datasets:
@@ -391,6 +408,28 @@ def patch_fn_example():
     #patch = twdh.action.package_patch( id=dataset.get("id"), data_admin_approved="approved", end_date="", group=["water-use"] )
     #patch = twdh.action.package_patch( id=dataset.get("id"), gazetteer= { "spatial_simp": "", "spatial_full": "", "place_keywords": "El Paso (City), Austin (City), Austin (County), ABCDEFGH" })
 
+
+def patch_fn_clear_spatial_data(remote,dataset,data):
+    patch = remote.action.package_patch( id=dataset.get("id"), gazetteer="" )
+
+def patch_fn_set_spatial_data(remote,dataset,data):
+
+    try:
+        spatial_simp = data.get('spatial_simp', '{}')
+        parsed_spatial_simp = json.loads(spatial_simp)
+    except json.JSONDecodeError as e:
+        print(f"JSON parsing error on spatial_simp: {e}, value: {spatial_simp}")
+
+    try:
+        spatial_full = data.get('spatial_full', '{}')
+        parsed_spatial_simp = json.loads(spatial_full)
+    except json.JSONDecodeError as e:
+        print(f"JSON parsing error on spatial_full: {e}, value: {spatial_full}")
+
+
+    patch = remote.action.package_patch( id=dataset.get("id"), spatial_simp=spatial_simp, spatial_full=spatial_full )
+
+    # {"gazetteer": {"spatial_simp": null,"spatial_full": null,"place_keywords": null}}
 
 def patch_fn_clear_data_dictionary(remote,dataset,data):
     patch = remote.action.package_patch( id=dataset.get("id"), data_dictionary="" )
@@ -438,6 +477,83 @@ def fetch_datasets(ctx,ids=None,package_type='dataset'):
                 datasets=query["results"]
 
     return datasets
+
+
+@twdhcli.command()
+@click.option('--patch-file',
+              required=True,
+              default=None,
+              help='JSON file containing patch data')
+@click.option('--confirm-each',
+              default=False,
+              is_flag=True,
+              help='Confirm each patch operation instead of just once at the start')
+@click.pass_context
+def restore_spatial(ctx, patch_file, confirm_each):
+    """
+    Patch datasets
+    """
+
+    twdh = ctx.obj['twdh']
+    logecho = ctx.obj['logecho']
+
+    try:
+        with open(patch_file, "r") as file:
+            patch_data = json.load(file)
+    except FileNotFoundError:
+        print("Error: The file was not found.")
+        sys.exit(1)
+    except json.JSONDecodeError as e:
+        print(f"Error: Could not decode JSON from '{patch_file}'. Check if the file contains valid JSON.")
+        print( f"{e}" )
+        sys.exit(1)
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
+        sys.exit(1)
+    logecho( "Restoring spatial data from {} ...".format(patch_file), "info" )
+
+    if not confirm_each:
+        logecho( "Hint: Use --confirm-each if you want to confirm one at a time", "note" )
+        if click.confirm(Fore.GREEN +'🟢 Proceed with all patches from {}? '.format(patch_file), abort=True):
+            logecho( "Proceeding with patches ...", "info" )
+        else: 
+            logecho( "Operation cancelled", "warning" )
+        confirm_all = False
+    else:
+        confirm_all = True
+
+    for dataset in patch_data['result']['results']:
+
+        logecho( "🟣", "divider" )
+
+        if 'gazetteer' in dataset:
+
+            spatial_full = dataset['gazetteer'].get('spatial_full', None)
+            spatial_simp = dataset['gazetteer'].get('spatial_simp', None)
+
+            if spatial_full != None or spatial_simp != None:
+
+                logecho( "Spatial data found for dataset \"{}\"".format(dataset['name']), "info" )
+                #logecho( "  spatial_full: {}".format(spatial_simp[:50]), "info" )
+                #logecho( "  spatial_simp: {}".format(spatial_simp[:50]), "info" )
+
+                if confirm_all:
+                    if click.confirm("🟢 Proceed to patch dataset \"{}\"? ".format(dataset['name']), abort=False, default=True):
+                        patch_fn_set_spatial_data( twdh, dataset, dataset.get('gazetteer', None))
+                        logecho( "Patched dataset \"{}\"".format(dataset['name']), "info" )
+                    else: 
+                        logecho( "Patch cancelled for dataset \"{}\"".format(dataset['name']), "warning" )
+                else:
+                    patch_fn_set_spatial_data( twdh, dataset, dataset.get('gazetteer', None))
+                    logecho( "Patched dataset \"{}\"".format(dataset['name']), "info" )
+
+
+            else:
+                logecho( "No spatial data found for \"{}\"".format(dataset['name']), "info" )
+        else:
+            logecho( "No spatial data found for \"{}\"".format(dataset['name']), "info" )
+
+
 
 
 """
