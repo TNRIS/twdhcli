@@ -113,6 +113,9 @@ def twdhcli(ctx, host, apikey, test_run, quiet, debug, logfile):
         elif level == 'info':
             logger.debug(message)
             click.echo('⚪️ ' + Fore.WHITE + message)
+        elif level == 'exit':
+            logger.debug(message)
+            click.echo('⚫️⚫️ ' + Fore.WHITE + message)
         elif level == 'celebration':
             logger.debug(message)
             click.echo('🎉 ' + Fore.MAGENTA + message)
@@ -173,6 +176,10 @@ def snapshot(ctx,dest):
 
     twdh = ctx.obj['twdh']
     logecho = ctx.obj['logecho']
+
+    _snapshot( dest, twdh, logecho )
+
+def _snapshot(dest, twdh, logecho):
 
     if not os.path.exists(dest):
         logecho('Destination directory {} not found'.format(dest), level='error')
@@ -475,6 +482,12 @@ def patch_datasets(ctx, patch_fn, ids, patch_data, dataset_type, confirm_each):
         logecho( "Patch function does not exist: {}".format(patch_fn), "info" )
         return
 
+    if click.confirm('🟢 Take a snapshot before running patches?', default=True):
+        _snapshot( './twdh-snapshots', twdh, logecho )
+    else:
+        logecho( "Skipped snapshot!", "warning" )
+
+
     datasets = fetch_datasets(ctx, ids, dataset_type)
 
     # Confirm patch operation
@@ -483,16 +496,16 @@ def patch_datasets(ctx, patch_fn, ids, patch_data, dataset_type, confirm_each):
         for dataset in datasets:
             logecho( "  - {} ({})".format(dataset.get("title"),dataset.get("id")), 'info')
         if not confirm_each:
-            if click.confirm('Proceed with all patches?', abort=True):
-                logecho( "  Proceeding with patches ...", "info" )
+            if click.confirm('🟢 Proceed with all patches?', abort=True):
+                logecho( "Proceeding with patches ...", "info" )
             else: 
-                logecho( "  Operation cancelled", "warning" )
+                logecho( "Operation cancelled", "exit" )
     else:
         if not confirm_each:
-            if click.confirm('+ No datasets specified. Proceed with patching all {} {}s?'.format(len(datasets), dataset_type)):
-                logecho( "  Proceeding with patches ...", "info" )
+            if click.confirm('🟢 Proceed with patching {} {}s?'.format(len(datasets), dataset_type)):
+                logecho( "Proceeding with patches ...", "info" )
             else: 
-                logecho( "  Operation cancelled", "warning" )
+                logecho( "Operation cancelled", "exit" )
                 return
 
     if patch_data:
@@ -510,10 +523,11 @@ def patch_datasets(ctx, patch_fn, ids, patch_data, dataset_type, confirm_each):
     #print( data_dict )
     #return
 
+
     for dataset in datasets:
         logecho( "+ About to patch {} ({})".format(dataset.get("title"),dataset.get("id")), 'info')
         if confirm_each:
-            if click.confirm('  Proceed with patch?'):
+            if click.confirm('🟢 Proceed with patch?'):
                 logecho( "    Proceeding with patch ...", "info" )
             else: 
                 logecho( "    Patch cancelled", "warning" )
@@ -537,9 +551,14 @@ def patch_fn_example():
 
 
 def patch_fn_clear_spatial_data(remote,dataset,data):
+
     patch = remote.action.package_patch( id=dataset.get("id"), gazetteer="" )
 
 def patch_fn_set_spatial_data(remote,dataset,data):
+
+    twdh = ctx.obj['twdh']
+    logecho = ctx.obj['logecho']
+    test_run = ctx.obj['test_run']
 
     try:
         spatial_simp = data.get('spatial_simp', '{}')
@@ -641,7 +660,7 @@ def restore_spatial(ctx, patch_file, confirm_each):
 
     if not confirm_each:
         logecho( "Hint: Use --confirm-each if you want to confirm one at a time", "note" )
-        if click.confirm(Fore.GREEN +'🟢 Proceed with all patches from {}? '.format(patch_file), abort=True):
+        if click.confirm('🟢 Proceed with all patches from {}? '.format(patch_file), abort=True):
             logecho( "Proceeding with patches ...", "info" )
         else: 
             logecho( "Operation cancelled", "warning" )
