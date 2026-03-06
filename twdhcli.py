@@ -8,10 +8,13 @@ import requests
 import os
 import sys
 import json
+from shapely import from_geojson, to_geojson
+from shapely.geometry import shape
 from dotenv import dotenv_values
 from datetime import datetime, date
 from time import perf_counter
 import logging
+import csv
 
 init(autoreset=True)
 
@@ -261,10 +264,15 @@ def list_applications(ctx,ids):
               required=False,
               default=None,
               help='list of dataset spatial stats to show')
+@click.option('--csvout',
+              type=click.Path(),
+              default='./spatial-stats.csv',
+              show_default=True,
+              help='The full path of the CSV output file.')
 @click.pass_context
-def spatial_stats(ctx,ids):
+def spatial_stats(ctx,ids,csvout):
     """
-    Show spatial stats of datasets
+    Get spatial stats of datasets and export them to a CSV
     """
 
     twdh = ctx.obj['twdh']
@@ -278,9 +286,13 @@ def spatial_stats(ctx,ids):
     spatial_full_total = 0
     spatial_simp_total = 0
 
+    csvdata = [['id','name','spatial_full_size','spatial_simp_size','spatial_simp_reduiction']]
     for dataset in datasets:
         logecho("{}".format(dataset["name"] ), "info")
         dataset_count += 1
+        spatial_full_size = 0
+        spatial_simp_size = 0
+        spatial_simp_reduction = 0
         if "gazetteer" in dataset:
             #logecho("> {}".format(dataset["gazetteer"].keys()), "info")
             if dataset["gazetteer"]["spatial_full"] is not None:
@@ -296,7 +308,8 @@ def spatial_stats(ctx,ids):
 
             if dataset["gazetteer"]["spatial_full"] is not None and dataset["gazetteer"]["spatial_full"] is not None:
                 spatial_dataset_count += 1
-                logecho("  simplification reduction = {}%".format( 100 - ( ( spatial_simp_size / spatial_full_size ) * 100 ) ), "info")
+                spatial_simp_reduction = ( 100 - ( ( spatial_simp_size / spatial_full_size ) * 100 ) )
+                logecho("  simplification reduction = {}%".format( spatial_simp_reduction ), "info")
             else:
                 logecho("  no spatial data", "info")
                 nonspatial_dataset_count += 1
@@ -304,13 +317,28 @@ def spatial_stats(ctx,ids):
             logecho("  no spatial data", "info")
             nonspatial_dataset_count += 1
 
+        csvdata.append( [dataset['id'], dataset['name'], spatial_full_size, spatial_simp_size, spatial_simp_reduction] )
+
     logecho("-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-", "info")
     logecho("  {} spatial datasets".format(spatial_dataset_count), "info")
     logecho("  {} nonspatial datasets".format(nonspatial_dataset_count), "info")
     logecho("  spatial_full_total = {} bytes".format(spatial_full_total), "info")
     logecho("  spatial_simp_total = {} bytes".format(spatial_simp_total), "info")
     logecho("  simplification reduction = {}%".format( 100 - ( ( spatial_simp_total / spatial_full_total ) * 100 ) ), "info")
+
+
+    try:
+        with open(csvout, 'w', newline='') as csvfile:
+            writer = csv.writer(csvfile)
+            writer.writerows(csvdata)
     
+    except FileNotFoundError:
+        print("Unable to write CSV / File not found error")
+        sys.exit(1)
+    except Exception as e:
+        print(f"An unexpected error occurred, unable to write CSV: {e}")
+        sys.exit(1)
+
 @twdhcli.command()
 @click.option('--patch-fn',
               required=True,
@@ -552,8 +580,6 @@ def restore_spatial(ctx, patch_file, confirm_each):
                 logecho( "No spatial data found for \"{}\"".format(dataset['name']), "info" )
         else:
             logecho( "No spatial data found for \"{}\"".format(dataset['name']), "info" )
-
-
 
 
 """
