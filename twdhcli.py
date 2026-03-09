@@ -174,12 +174,12 @@ def snapshot(ctx,dest):
     Create JSON snapshot files for datasets, applications and organizations
     """
 
+    _snapshot(ctx,dest)
+
+def _snapshot(ctx,dest):
+
     twdh = ctx.obj['twdh']
     logecho = ctx.obj['logecho']
-
-    _snapshot( dest, twdh, logecho )
-
-def _snapshot(dest, twdh, logecho):
 
     if not os.path.exists(dest):
         logecho('Destination directory {} not found'.format(dest), level='error')
@@ -196,6 +196,8 @@ def _snapshot(dest, twdh, logecho):
         logecho('An error occurred: {}'.e, level='error')
         sys.exit(1)
 
+    _spatial_stats( ctx, [], '{}/spatial-stats.csv'.format( snap_dest ), True )
+
     dataset_types = [ 'dataset', 'application' ]
 
     # Create human readable dataset and application backups
@@ -203,7 +205,7 @@ def _snapshot(dest, twdh, logecho):
         dataset_file = '{}/{}.json'.format(snap_dest, dataset_type) 
         results = twdh.action.package_search(
             rows=100000,
-            fq="type:dataset",
+            fq="type:{}".format(dataset_type),
             include_deleted=True,
             include_drafts=True,
             include_private=True
@@ -226,7 +228,6 @@ def _snapshot(dest, twdh, logecho):
         obj_file = '{}/{}.jsonl'.format(snap_dest, obj_type)
         try:
 
-            #breakpoint()
             """
             # I would like to use the 'dump' functionality of ckanapi here but I can't figure out how to make it work, so I'll call the command instead for now
             with open(obj_file, 'w') as jsonl_file:
@@ -234,7 +235,6 @@ def _snapshot(dest, twdh, logecho):
                     jsonl_file.write(json.dumps(item) + '\n')
             """
 
-            #breakpoint()
             command = "ckanapi dump {obj_type} --apikey={apikey} --all -O {obj_file} -r {url}".format( \
                 obj_type=obj_type, \
                 apikey=twdh.apikey, \
@@ -243,8 +243,9 @@ def _snapshot(dest, twdh, logecho):
             )
 
             #logecho( command, 'info' )
+            logecho( 'Dumping {}...\n'.format(obj_type), 'info' )
             output = subprocess.getoutput(command)
-            logecho( 'Dumping {}...\n{}'.format(obj_type,output), 'info' )
+            logecho( output, 'info' )
             logecho( 'Created snapshot file: {}'.format(obj_file), 'info' )
 
 
@@ -258,7 +259,7 @@ def _snapshot(dest, twdh, logecho):
 
         logecho("Successfully dumped datasets to {}".format(obj_file), 'info')
 
-    logecho("Snapshots complete!", 'celebration')
+    logecho("Snapshot complete!", 'celebration')
 
 @twdhcli.command()
 @click.option('--ids',
@@ -375,11 +376,19 @@ def list_applications(ctx,ids):
               default='./spatial-stats.csv',
               show_default=True,
               help='The full path of the CSV output file.')
+@click.option('--quiet',
+              default=False,
+              is_flag=True,
+              help='Don\t write per-dataset details to stdout')
 @click.pass_context
-def spatial_stats(ctx,ids,csvout):
+def spatial_stats(ctx,ids,csvout,quiet):
     """
     Get spatial stats of datasets and export them to a CSV
     """
+
+    _spatial_stats( ctx, ids, csvout, quiet )
+
+def _spatial_stats(ctx, ids, csvout, quiet):
 
     twdh = ctx.obj['twdh']
     logecho = ctx.obj['logecho']
@@ -394,44 +403,51 @@ def spatial_stats(ctx,ids,csvout):
 
     csvdata = [['id','name','spatial_full_size','spatial_simp_size','spatial_simp_reduiction']]
     for dataset in datasets:
-        logecho("{}".format(dataset["name"] ), "info")
+        if not quiet:
+            logecho("{}".format(dataset["name"] ), "info")
         dataset_count += 1
         spatial_full_size = 0
         spatial_simp_size = 0
         spatial_simp_reduction = 0
         if "gazetteer" in dataset:
-            #logecho("> {}".format(dataset["gazetteer"].keys()), "info")
             if dataset["gazetteer"]["spatial_full"] is not None:
-                #logecho("> spatial_full = {}".format(dataset["gazetteer"]["spatial_full"]), "info")
                 spatial_full_size = len(dataset["gazetteer"]["spatial_full"].encode('utf-8'))
-                logecho("  spatial_full = {} bytes".format(spatial_full_size), "info")
+                if not quiet:
+                    logecho("  spatial_full = {} bytes".format(spatial_full_size), "info")
                 spatial_full_total += spatial_full_size
             if dataset["gazetteer"]["spatial_simp"] is not None:
-                #logecho("> spatial_simp = {}".format(dataset["gazetteer"]["spatial_simp"]), "info")
                 spatial_simp_size = len(dataset["gazetteer"]["spatial_simp"].encode('utf-8'))
-                logecho("  spatial_simp = {} bytes".format(spatial_simp_size), "info")
+                if not quiet:
+                    logecho("  spatial_simp = {} bytes".format(spatial_simp_size), "info")
                 spatial_simp_total += spatial_simp_size
-
             if dataset["gazetteer"]["spatial_full"] is not None and dataset["gazetteer"]["spatial_full"] is not None:
                 spatial_dataset_count += 1
                 spatial_simp_reduction = ( 100 - ( ( spatial_simp_size / spatial_full_size ) * 100 ) )
-                logecho("  simplification reduction = {}%".format( spatial_simp_reduction ), "info")
+                if not quiet:
+                    logecho("  simplification reduction = {}%".format( spatial_simp_reduction ), "info")
             else:
-                logecho("  no spatial data", "info")
+                if not quiet:
+                    logecho("  no spatial data", "info")
                 nonspatial_dataset_count += 1
         else:
-            logecho("  no spatial data", "info")
+            if not quiet:
+                logecho("  no spatial data", "info")
             nonspatial_dataset_count += 1
 
         csvdata.append( [dataset['id'], dataset['name'], spatial_full_size, spatial_simp_size, spatial_simp_reduction] )
 
-    logecho("-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-", "info")
-    logecho("  {} spatial datasets".format(spatial_dataset_count), "info")
-    logecho("  {} nonspatial datasets".format(nonspatial_dataset_count), "info")
-    logecho("  spatial_full_total = {} bytes".format(spatial_full_total), "info")
-    logecho("  spatial_simp_total = {} bytes".format(spatial_simp_total), "info")
-    logecho("  simplification reduction = {}%".format( 100 - ( ( spatial_simp_total / spatial_full_total ) * 100 ) ), "info")
-
+    if not quiet:
+        logecho("-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-", "info")
+    logecho("{} spatial datasets".format(spatial_dataset_count), "info")
+    csvdata.insert(0,["# {} spatial datasets".format(spatial_dataset_count)])
+    logecho("{} nonspatial datasets".format(nonspatial_dataset_count), "info")
+    csvdata.insert(1,["# {} nonspatial datasets".format(nonspatial_dataset_count)])
+    logecho("spatial_full_total = {} bytes".format(spatial_full_total), "info")
+    csvdata.insert(2,["# spatial_full_total = {} bytes".format(spatial_full_total)])
+    logecho("spatial_simp_total = {} bytes".format(spatial_simp_total), "info")
+    csvdata.insert(3,["# spatial_simp_total = {} bytes".format(spatial_simp_total)])
+    logecho("simplification reduction = {}%".format( 100 - ( ( spatial_simp_total / spatial_full_total ) * 100 ) ), "info")
+    csvdata.insert(4,["# simplification reduction = {}%".format( 100 - ( ( spatial_simp_total / spatial_full_total ) * 100 ))])
 
     try:
         with open(csvout, 'w', newline='') as csvfile:
@@ -483,7 +499,7 @@ def patch_datasets(ctx, patch_fn, ids, patch_data, dataset_type, confirm_each):
         return
 
     if click.confirm('🟢 Take a snapshot before running patches?', default=True):
-        _snapshot( './twdh-snapshots', twdh, logecho )
+        _snapshot( ctx, './twdh-snapshots' )
     else:
         logecho( "Skipped snapshot!", "warning" )
 
@@ -540,6 +556,8 @@ def patch_datasets(ctx, patch_fn, ids, patch_data, dataset_type, confirm_each):
 
         except Exception as e:
             print( e )
+
+    
 
 
 def patch_fn_example():
