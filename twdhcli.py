@@ -36,6 +36,8 @@ def get_patch_functions():
         'set_app_email': patch_fn_set_app_email,
         'clear_spatial_data': patch_fn_clear_spatial_data,
         'set_spatial_data': patch_fn_set_spatial_data,
+        'fix_empty_date_ranges': patch_fn_fix_empty_date_ranges,
+        'validate_datasets': patch_fn_validate_datasets,
 
     }
 
@@ -284,6 +286,73 @@ def show_datasets(ctx,ids):
 @click.option('--ids',
               required=False,
               default=None,
+              help='list of bad datasets')
+@click.pass_context
+def get_bad_datasets(ctx,ids):
+    """
+    Show datasets with invalid data_admin_approved field
+    """
+
+    twdh = ctx.obj['twdh']
+
+    datasets = fetch_datasets(ctx, ids)
+
+    ok_values = ['approved','unapproved']
+    for dataset in datasets:
+        if dataset['data_admin_approved'] not in ok_values:
+            print( dataset['name'] )
+            print( dataset['data_admin_approved'] )
+            #patch = twdh.action.package_patch( id=dataset.get("id"), data_admin_approved='unapproved' )
+
+@twdhcli.command()
+@click.option('--ids',
+              required=False,
+              default=None,
+              help='dataset state report')
+@click.pass_context
+def get_dataset_state_report(ctx,ids):
+    """
+    Print a report of dataset states
+    """
+
+    twdh = ctx.obj['twdh']
+    logecho = ctx.obj['logecho']
+
+    data_admin_approved = ['approved','unapproved']
+    state = ['active','draft']
+    private = ['true','false']
+
+    results = []
+    for d in data_admin_approved:
+        for s in state:
+            for p in private:
+                result = twdh.action.package_search( 
+                        fq_list=[ 
+                            'type:dataset',
+                            'data_admin_approved:{}'.format(d), 
+                            'state:{}'.format(s), 
+                            'private:{}'.format(p) 
+                        ],
+                        include_private=True,
+                        include_drafts=True
+                    ) 
+                results.append( result)
+                logecho('data_admin_approved={}/state={}/private={}: {}'.format( 
+                    d, 
+                    s, 
+                    p, 
+                    result['count'] 
+                    ) )
+
+    c = 0
+    for r in results:
+        c+= r['count']
+    logecho('{} datasets'.format(c))
+
+@twdhcli.command()
+@click.option('--ids',
+              required=False,
+              default=None,
               help='list of unapproved public active datasets')
 @click.pass_context
 def get_unapproved_public_active_datasets(ctx,ids):
@@ -294,15 +363,47 @@ def get_unapproved_public_active_datasets(ctx,ids):
     twdh = ctx.obj['twdh']
     logecho = ctx.obj['logecho']
 
-
     results = twdh.action.package_search(
         fq_list=[
             'data_admin_approved:unapproved',
             'state:active',
             'private:false'
+        ],
+        rows=10000
+    )
+    if results['count'] > 0:
+        for result in results['results']:
+            print(result['id'])
+    else:
+        logecho( 'No unapproved, public, active datasets found. That\'s a good thing!', 'info' )
+
+@twdhcli.command()
+@click.option('--ids',
+              required=False,
+              default=None,
+              help='list of approved private draft datasets')
+@click.pass_context
+def get_approved_private_draft_datasets(ctx,ids):
+    """
+    Show approved private draft datasets
+    """
+
+    twdh = ctx.obj['twdh']
+    logecho = ctx.obj['logecho']
+
+
+    results = twdh.action.package_search(
+        fq_list=[
+            'data_admin_approved:approved',
+            'state:draft',
+            'private:true'
         ]
     )
-    print(results)
+    if results['count'] > 0:
+        for result in results['results']:
+            print(result['id'])
+    else:
+        logecho( 'No approved, private, draft datasets found. That\'s a good thing!', 'info' )
 
 
 @twdhcli.command()
@@ -446,8 +547,14 @@ def _spatial_stats(ctx, ids, csvout, quiet):
     csvdata.insert(2,["# spatial_full_total = {} bytes".format(spatial_full_total)])
     logecho("spatial_simp_total = {} bytes".format(spatial_simp_total), "info")
     csvdata.insert(3,["# spatial_simp_total = {} bytes".format(spatial_simp_total)])
-    logecho("simplification reduction = {}%".format( 100 - ( ( spatial_simp_total / spatial_full_total ) * 100 ) ), "info")
-    csvdata.insert(4,["# simplification reduction = {}%".format( 100 - ( ( spatial_simp_total / spatial_full_total ) * 100 ))])
+
+
+    if spatial_full_total > 0:
+        simplification_reduction = 100 - ( ( spatial_simp_total / spatial_full_total ) * 100 )
+    else:
+        simplification_reduction = 0
+    logecho("simplification reduction = {}%".format( simplification_reduction ), "info")
+    csvdata.insert(4,["# simplification reduction = {}%".format( simplification_reduction )])
 
     try:
         with open(csvout, 'w', newline='') as csvfile:
@@ -568,15 +675,31 @@ def patch_fn_example():
     #patch = twdh.action.package_patch( id=dataset.get("id"), gazetteer= { "spatial_simp": "", "spatial_full": "", "place_keywords": "El Paso (City), Austin (City), Austin (County), ABCDEFGH" })
 
 
+def patch_fn_validate_datasets(remote,dataset,data):
+
+    patch = remote.action.package_patch( id=dataset.get("id") )
+
+def patch_fn_fix_empty_date_ranges(remote,dataset,data):
+
+    if 'date_range' in dataset:
+        print( dataset['date_range'] )
+        print( 'Date range exists, skipping ...' )
+    else:
+        print( 'No date range!' )
+        print( dataset['group'] )
+
+        patch = remote.action.package_patch( id=dataset.get("id"), date_range="no date range" )
+
+
 def patch_fn_clear_spatial_data(remote,dataset,data):
 
     patch = remote.action.package_patch( id=dataset.get("id"), gazetteer="" )
 
 def patch_fn_set_spatial_data(remote,dataset,data):
 
-    twdh = ctx.obj['twdh']
-    logecho = ctx.obj['logecho']
-    test_run = ctx.obj['test_run']
+    #twdh = ctx.obj['twdh']
+    #logecho = ctx.obj['logecho']
+    #test_run = ctx.obj['test_run']
 
     try:
         spatial_simp = data.get('spatial_simp', '{}')
@@ -591,9 +714,17 @@ def patch_fn_set_spatial_data(remote,dataset,data):
         print(f"JSON parsing error on spatial_full: {e}, value: {spatial_full}")
 
 
-    patch = remote.action.package_patch( id=dataset.get("id"), spatial_simp=spatial_simp, spatial_full=spatial_full )
+    try:
+        patch = remote.action.package_patch( id=dataset.get("id"), spatial_simp=spatial_simp, spatial_full=spatial_full )
 
-    # {"gazetteer": {"spatial_simp": null,"spatial_full": null,"place_keywords": null}}
+    except Exception as e:
+        if str(e) == 'Not found':
+            print( "Error: dataset {} not found".format(e))
+            return False
+        else:
+            print("Error: {}".format(e))
+            return False
+    return patch
 
 def patch_fn_clear_data_dictionary(remote,dataset,data):
     patch = remote.action.package_patch( id=dataset.get("id"), data_dictionary="" )
@@ -655,12 +786,13 @@ def fetch_datasets(ctx,ids=None,package_type='dataset'):
 @click.pass_context
 def restore_spatial(ctx, patch_file, confirm_each):
     """
-    Patch datasets
+    Restore spatial data to datasets
     """
 
     twdh = ctx.obj['twdh']
     logecho = ctx.obj['logecho']
 
+    print( patch_file )
     try:
         with open(patch_file, "r") as file:
             patch_data = json.load(file)
@@ -686,7 +818,7 @@ def restore_spatial(ctx, patch_file, confirm_each):
     else:
         confirm_all = True
 
-    for dataset in patch_data['result']['results']:
+    for dataset in patch_data['results']:
 
         logecho( "🟣", "divider" )
 
@@ -703,13 +835,17 @@ def restore_spatial(ctx, patch_file, confirm_each):
 
                 if confirm_all:
                     if click.confirm("🟢 Proceed to patch dataset \"{}\"? ".format(dataset['name']), abort=False, default=True):
-                        patch_fn_set_spatial_data( twdh, dataset, dataset.get('gazetteer', None))
-                        logecho( "Patched dataset \"{}\"".format(dataset['name']), "info" )
+                        if patch_fn_set_spatial_data( twdh, dataset, dataset.get('gazetteer', None)):
+                            logecho( "Patched dataset \"{}\"".format(dataset['name']), "info" )
+                        else:
+                            logecho( "Error patching dataset \"{}\"".format(dataset['name']), "info" )
                     else: 
                         logecho( "Patch cancelled for dataset \"{}\"".format(dataset['name']), "warning" )
                 else:
-                    patch_fn_set_spatial_data( twdh, dataset, dataset.get('gazetteer', None))
-                    logecho( "Patched dataset \"{}\"".format(dataset['name']), "info" )
+                    if patch_fn_set_spatial_data( twdh, dataset, dataset.get('gazetteer', None)):
+                        logecho( "Patched dataset \"{}\"".format(dataset['name']), "info" )
+                    else:
+                        logecho( "Error patching dataset \"{}\"".format(dataset['name']), "info" )
 
 
             else:

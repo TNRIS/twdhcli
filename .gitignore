@@ -4,3 +4,4 @@ Docker/.env
 tmp
 .env
 twdh-snapshots
+twdh-archive
