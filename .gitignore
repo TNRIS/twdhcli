@@ -5,3 +5,4 @@ tmp
 .env
 twdh-snapshots
 twdh-archive
+__pycache__

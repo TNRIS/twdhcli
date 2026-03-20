@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 from colorama import init, Fore, Back, Style
 import click
 import click_config_file
@@ -8,8 +7,6 @@ import requests
 import os
 import sys
 import json
-from shapely import from_geojson, to_geojson
-from shapely.geometry import shape
 from dotenv import dotenv_values
 from datetime import datetime, date
 from time import perf_counter
@@ -19,30 +16,20 @@ from pathlib import Path
 from urllib.parse import urlparse
 import subprocess
 
+import helpers as h
+
+version = '0.11.0'
+
+# Initialize Colorama with autoreset enabled
 init(autoreset=True)
 
 log = logging.getLogger(__name__)
 FORMAT = '%(message)s'
 #logging.basicConfig(format=FORMAT, level=logging.INFO)
 
-version = '0.1'
 formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
 
-def get_patch_functions():
-    return  {
-        'example': patch_fn_example,
-        'clear_data_dictionary': patch_fn_clear_data_dictionary,
-        'set_title': patch_fn_set_title,
-        'set_app_email': patch_fn_set_app_email,
-        'clear_spatial_data': patch_fn_clear_spatial_data,
-        'set_spatial_data': patch_fn_set_spatial_data,
-        'fix_empty_date_ranges': patch_fn_fix_empty_date_ranges,
-        'validate_datasets': patch_fn_validate_datasets,
-
-    }
-
 def setup_logger(name, log_file, level=logging.INFO):
-    """To setup as many loggers as you want"""
 
     handler = logging.FileHandler(log_file)
     handler.setFormatter(formatter)
@@ -53,16 +40,32 @@ def setup_logger(name, log_file, level=logging.INFO):
 
     return logger
 
+
+def get_patch_functions():
+    return  {
+        'example': patch_fn_example,
+        'clear_data_dictionary': patch_fn_clear_data_dictionary,
+        'set_title': patch_fn_set_title,
+        'set_app_email': patch_fn_set_app_email,
+        'clear_spatial_data': patch_fn_clear_spatial_data,
+        'clear_spatial_data_full': patch_fn_clear_spatial_data_full,
+        'set_spatial_data': patch_fn_set_spatial_data,
+        'fix_empty_date_ranges': patch_fn_fix_empty_date_ranges,
+        'validate_datasets': patch_fn_validate_datasets,
+
+    }
+
 @click.group()
 @click.option('--host',
               required=False,
-              help='TWDH CKAN host.')
+              help='TWDH CKAN host, usually https://txwaterdatahub.org')
 @click.option('--apikey',
               required=False,
-              help='TWDH CKAN api key to use if authentication is required.')
+              help='TWDH CKAN API key to use if authentication is required.')
 @click.option('--test-run',
               is_flag=True,
-              help='Show what would change but don\'t make any changes.')
+              default=False,
+              help='Show less information.')
 @click.option('--quiet',
               is_flag=True,
               help='Show less information.')
@@ -95,38 +98,38 @@ def twdhcli(ctx, host, apikey, test_run, quiet, debug, logfile):
         if level == 'error':
             logger.error(message)
             click.echo(Fore.RED + '🔴 ' + 
-                       message, err=True) if not quiet else True
+                message, err=True) if not quiet else True
         elif level == 'warning':
             logger.warning(message)
             click.echo(Fore.YELLOW + '🟡 ' +
-                       Fore.WHITE + message) if not quiet else True
+                Fore.WHITE + message) if not quiet else True
         elif level == 'debug':
             logger.debug(message)
             click.echo('🟢🟢 ' +
-                       Fore.WHITE + message) if debug else False
+                Fore.WHITE + message) if debug else False
         elif level == 'note':
             logger.debug(message)
             click.echo('🟢 ' +
-                       Fore.GREEN + message)
+                Fore.GREEN + message) if not quiet else True
         elif level == 'detail':
             logger.debug(message)
             click.echo('🔵 ' +
-                       Fore.BLUE + message)
+                Fore.BLUE + message) if not quiet else True
         elif level == 'info':
             logger.debug(message)
-            click.echo('⚪️ ' + Fore.WHITE + message)
+            click.echo('⚪️ ' + Fore.WHITE + message) if not quiet else True
         elif level == 'exit':
             logger.debug(message)
-            click.echo('⚫️⚫️ ' + Fore.WHITE + message)
+            click.echo('⚫️ ' + Fore.WHITE + message) if not quiet else True
         elif level == 'celebration':
             logger.debug(message)
-            click.echo('🎉 ' + Fore.MAGENTA + message)
+            click.echo('🎉 ' + Fore.MAGENTA + message) if not quiet else True
         elif level == 'divider':
             logger.debug(message)
-            click.echo(Fore.MAGENTA + message)
+            click.echo(Fore.MAGENTA + message) if not quiet else True
         else:
             logger.info(message)
-            click.echo(Fore.GREEN + message)
+            click.echo(Fore.GREEN + message) if not quiet else True
 
     logecho('Starting twdhcli/%s ...' % version, 'detail')
 
@@ -175,93 +178,496 @@ def snapshot(ctx,dest):
     """
     Create JSON snapshot files for datasets, applications and organizations
     """
+    h.snapshot(ctx,dest)
 
-    _snapshot(ctx,dest)
 
-def _snapshot(ctx,dest):
+@twdhcli.command()
+@click.option('--patch-fn',
+              required=True,
+              default=None,
+              help='patch function to apply')
+@click.option('--ids',
+              required=False,
+              default=None,
+              help='list of dataset ids to patch')
+@click.option('--patch-data',
+              required=False,
+              default=None,
+              help='JSON blob containing patch values')
+@click.option('--dataset-type',
+              required=False,
+              default="dataset",
+              help='dataset or application')
+@click.option('--confirm-each',
+              default=False,
+              is_flag=True,
+              help='Confirm each patch operation instead of just once at the start')
+@click.option('--skip-snapshot',
+              default=False,
+              is_flag=True,
+              help='Don\'t prompt for snapshot, and don\'t create a snapshot')
+@click.pass_context
+def patch_datasets(ctx, patch_fn, ids, patch_data, dataset_type, confirm_each, skip_snapshot):
+    """
+    Patch datasets
+    """
+
+    twdh = ctx.obj['twdh']
+    logecho = ctx.obj['logecho']
+    test_run = ctx.obj['test_run']
+
+    patch_fn_dict = get_patch_functions()
+
+    if patch_fn not in patch_fn_dict:
+        logecho( "Patch function does not exist: {}".format(patch_fn), "info" )
+        return
+
+    if not skip_snapshot and click.confirm('🟢 Take a snapshot before running patches?', default=True):
+        h.snapshot( ctx, './twdh-snapshots' )
+    else:
+        logecho( "Skipped snapshot!", "warning" )
+
+    datasets = h.fetch_datasets(ctx, ids, dataset_type)
+
+    # Confirm patch operation
+    if ids:
+        logecho( "Prepared to patch the following datasets", 'warning')
+        for dataset in datasets:
+            logecho( "- {} ({})".format(dataset.get("title"),dataset.get("id")), 'info')
+        if not confirm_each:
+            if click.confirm('🟢 Proceed with all patches?'):
+                logecho( "Proceeding with patches ...", "info" )
+            else: 
+                logecho( "Operation cancelled", "exit" )
+                sys.exit(0)
+    else:
+        if not confirm_each:
+            if click.confirm('🟢 Proceed with patching {} {}s?'.format(len(datasets), dataset_type)):
+                logecho( "Proceeding with patches ...", "info" )
+            else: 
+                logecho( "Operation cancelled", "exit" )
+                return
+
+    if patch_data:
+        try:
+            data_dict = json.loads(patch_data)
+        except json.JSONDecodeError:
+            logecho("Error: Could not decode JSON '{}'".format(patch_data), 'error')
+            return False
+        except Exception as e:
+            logecho("An unexpected error occurred: {}".format(e), 'error')
+            return False
+    else:
+        data_dict = {}
+        logecho( "Patch data is an empty dict", "warning" )
+
+    for dataset in datasets:
+        logecho( "About to patch {} ({})".format(dataset.get("title"),dataset.get("id")), 'info')
+        if confirm_each:
+            if click.confirm('🟢 Proceed with patch?'):
+                logecho( "Proceeding with patch ...", "info" )
+            else: 
+                logecho( "Patch cancelled", "warning" )
+                continue
+        try:
+            # Run patch function
+            if patch_fn_dict[patch_fn](ctx,dataset,data_dict):
+                logecho( "... patched", 'info')
+            elif test_run:
+                logecho( "... patched skipped by test_run", 'info')
+            else:
+                logecho( "... patched failed", 'info')
+
+        except Exception as e:
+            logecho( e, 'error' )
+
+def patch_fn_example(ctx,dataset,data):
+
+    remote = ctx.obj['twdh']
+    logecho = ctx.obj['logecho']
+    test_run = ctx.obj['test_run']
+
+    try:
+        logecho('This is an example patch function', 'info')    
+        
+        if test_run:
+            return False
+
+        # Call action here
+
+    except Exception as e:
+        if str(e) == 'Not found':
+            logecho( "Error: dataset {} not found".format(dataset.get("id")), 'error')
+            return False
+        else:
+            logecho("Error: {}".format(e), 'error')
+            return False
+
+    return True
+
+
+def patch_fn_validate_datasets(ctx,dataset,data):
+
+    remote = ctx.obj['twdh']
+    logecho = ctx.obj['logecho']
+    test_run = ctx.obj['test_run']
+
+    try:
+        if test_run:
+            return False
+
+        remote.action.package_patch( id=dataset.get("id") )
+
+    except Exception as e:
+        logecho( "Bailing out: Dataset {} does not validate: {}".format( dataset['name'], e ), 'error' )
+        sys.exit(1)
+
+    return True
+
+
+def patch_fn_fix_empty_date_ranges(ctx,dataset,data):
+
+    remote = ctx.obj['twdh']
+    logecho = ctx.obj['logecho']
+    test_run = ctx.obj['test_run']
+
+    if 'date_range' in dataset:
+        logecho( dataset['date_range'], 'info' )
+        logecho( 'Date range exists, skipping ...', 'info' )
+    else:
+        logecho( 'No date range!', 'info' )
+
+        try:
+            if test_run:
+                return False
+
+            remote.action.package_patch( id=dataset.get("id"), date_range="no date range" )
+
+        except Exception as e:
+            if str(e) == 'Not found':
+                logecho( "Error: dataset {} not found".format(dataset.get("id")), 'error')
+                return False
+            else:
+                logecho("Error: {}".format(e), 'error')
+                return False
+    return True
+
+
+def patch_fn_clear_spatial_data(ctx,dataset,data):
+
+    remote = ctx.obj['twdh']
+    logecho = ctx.obj['logecho']
+    test_run = ctx.obj['test_run']
+
+    try:
+        if test_run:
+            return False
+
+        remote.action.package_patch( id=dataset.get("id"), gazetteer="" )
+
+    except Exception as e:
+        if str(e) == 'Not found':
+            logecho( "Error: dataset {} not found".format(dataset.get("id")), 'error')
+            return False
+        else:
+            logecho("Error: {}".format(e), 'error')
+            return False
+
+    return True
+    
+def patch_fn_clear_spatial_data_full(ctx,dataset,data):
+
+    remote = ctx.obj['twdh']
+    logecho = ctx.obj['logecho']
+    test_run = ctx.obj['test_run']
+
+    try:
+        if test_run:
+            return False
+
+        remote.action.package_patch( id=dataset.get("id"), gazetteer="" )
+
+    except Exception as e:
+        if str(e) == 'Not found':
+            logecho( "Error: dataset {} not found".format(dataset.get("id")), 'error')
+            return False
+        else:
+            logecho("Error: {}".format(e), 'error')
+            return False
+
+    return True
+
+
+def patch_fn_set_spatial_data(ctx,dataset,data):
+
+    remote = ctx.obj['twdh']
+    logecho = ctx.obj['logecho']
+    test_run = ctx.obj['test_run']
+
+    try:
+        spatial_simp = data.get('spatial_simp', '{}')
+        parsed_spatial_simp = json.loads(spatial_simp)
+
+    except json.JSONDecodeError as e:
+        logecho(f"JSON parsing error on spatial_simp: {e}, value: {spatial_simp}", 'error')
+
+    try:
+        spatial_full = data.get('spatial_full', '{}')
+        parsed_spatial_simp = json.loads(spatial_full)
+
+    except json.JSONDecodeError as e:
+        logecho(f"JSON parsing error on spatial_full: {e}, value: {spatial_full}",'error')
+
+    try:
+        if test_run:
+            return False
+
+        remote.action.package_patch( id=dataset.get("id"), spatial_simp=spatial_simp, spatial_full=spatial_full )
+
+    except Exception as e:
+        if str(e) == 'Not found':
+            logecho( "Error: dataset {} not found".format(dataset.get("id")), 'error')
+            return False
+        else:
+            logecho("Error: {}".format(e), 'error')
+            return False
+
+    return True
+
+def patch_fn_clear_data_dictionary(ctx,dataset,data):
+
+    remote = ctx.obj['twdh']
+    logecho = ctx.obj['logecho']
+    test_run = ctx.obj['test_run']
+
+    try:
+        if test_run:
+            return False
+
+        remote.action.package_patch( id=dataset.get("id"), data_dictionary="" )
+
+    except Exception as e:
+        if str(e) == 'Not found':
+            logecho( "Error: dataset {} not found".format(dataset.get("id")), 'error')
+            return False
+        else:
+            logecho("Error: {}".format(e), 'error')
+            return False
+
+    return True
+
+
+def patch_fn_set_title(ctx,dataset,data):
+
+    remote = ctx.obj['twdh']
+    logecho = ctx.obj['logecho']
+    test_run = ctx.obj['test_run']
+
+    try:
+        if test_run:
+            return False
+
+        remote.action.package_patch( id=dataset.get("id"), title=data['title'] )
+
+    except Exception as e:
+        if str(e) == 'Not found':
+            logecho( "Error: dataset {} not found".format(dataset.get("id")), 'error')
+            return False
+        else:
+            logecho("Error: {}".format(e), 'error')
+            return False
+
+    return True
+
+def patch_fn_set_app_email(ctx,dataset,data):
+
+    remote = ctx.obj['twdh']
+    logecho = ctx.obj['logecho']
+    test_run = ctx.obj['test_run']
+
+    try:
+        if test_run:
+            return False
+
+        remote.action.package_patch( id=dataset.get("id"), data_contact_email=data['email'] )
+
+    except Exception as e:
+        if str(e) == 'Not found':
+            logecho( "Error: dataset {} not found".format(dataset.get("id")), 'error')
+            return False
+        else:
+            logecho("Error: {}".format(e), 'error')
+            return False
+
+    return True
+
+
+@twdhcli.command()
+@click.option('--patch-file',
+              required=True,
+              default=None,
+              help='JSON file containing patch data')
+@click.option('--confirm-each',
+              default=False,
+              is_flag=True,
+              help='Confirm each patch operation instead of just once at the start')
+@click.pass_context
+def restore_spatial(ctx, patch_file, confirm_each):
+    """
+    Restore spatial data to datasets
+    """
 
     twdh = ctx.obj['twdh']
     logecho = ctx.obj['logecho']
 
-    if not os.path.exists(dest):
-        logecho('Destination directory {} not found'.format(dest), level='error')
-        sys.exit()
-
     try:
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        parsed_address = urlparse(twdh.address)
-        logecho( parsed_address.netloc )
-        snap_dest = "{}/{}_{}".format( dest, parsed_address.netloc, timestamp )
-        Path(snap_dest).mkdir(parents=True)
-
-    except Exception as e:
-        logecho('An error occurred: {}'.e, level='error')
+        with open(patch_file, "r") as file:
+            patch_data = json.load(file)
+    except FileNotFoundError:
+        logecho("Error: The file was not found.", 'error')
         sys.exit(1)
+    except json.JSONDecodeError as e:
+        logecho(f"Error: Could not decode JSON from '{patch_file}'. Check if the file contains valid JSON.", 'error')
+        logecho( f"{e}", 'error' )
+        sys.exit(1)
+    except Exception as e:
+        logecho(f"An unexpected error occurred: {e}", 'error')
+        sys.exit(1)
+    logecho( "Restoring spatial data from {} ...".format(patch_file), "info" )
 
-    _spatial_stats( ctx, [], '{}/spatial-stats.csv'.format( snap_dest ), True )
+    if not confirm_each:
+        logecho( "Hint: Use --confirm-each if you want to confirm one at a time", "note" )
+        if click.confirm('🟢 Proceed with all patches from {}? '.format(patch_file)):
+            logecho( "Proceeding with patches ...", "info" )
+        else: 
+            logecho( "Operation cancelled", "warning" )
+            sys.exit(0)
+        confirm_all = False
+    else:
+        confirm_all = True
 
-    dataset_types = [ 'dataset', 'application' ]
+    for dataset in patch_data['results']:
 
-    # Create human readable dataset and application backups
-    for dataset_type in dataset_types:
-        dataset_file = '{}/{}.json'.format(snap_dest, dataset_type) 
-        results = twdh.action.package_search(
-            rows=100000,
-            fq="type:{}".format(dataset_type),
-            include_deleted=True,
-            include_drafts=True,
-            include_private=True
-        )
-        try:
-            with open(dataset_file, 'w') as json_file:
-                json.dump(results, json_file, indent=4) #
-            logecho( 'Created snapshot file: {}'.format(dataset_file), 'info' )
+        logecho( "🟣", "divider" )
 
-        except FileNotFoundError:
-            logecho( "Unable to write JSON / Destination not found error", 'error' )
-            sys.exit(1)
-        except Exception as e:
-            logecho( "An unexpected error occurred, unable to write JSON: {}".format(e), 'error' )
-            sys.exit(1)
+        run_patch = True
 
-    # Create JSONL backups of datasets, applications, organizations, users. Datasets include type 'dataset' and 'application' all in the same file.
-    obj_types = [ 'datasets', 'groups', 'organizations', 'users']
-    for obj_type in obj_types:
-        obj_file = '{}/{}.jsonl'.format(snap_dest, obj_type)
-        try:
+        if 'gazetteer' in dataset:
 
-            """
-            # I would like to use the 'dump' functionality of ckanapi here but I can't figure out how to make it work, so I'll call the command instead for now
-            with open(obj_file, 'w') as jsonl_file:
-                for item in twdh.dump_things(obj_type):
-                    jsonl_file.write(json.dumps(item) + '\n')
-            """
+            spatial_full = dataset['gazetteer'].get('spatial_full', None)
+            spatial_simp = dataset['gazetteer'].get('spatial_simp', None)
 
-            command = "ckanapi dump {obj_type} --apikey={apikey} --all -O {obj_file} -r {url}".format( \
-                obj_type=obj_type, \
-                apikey=twdh.apikey, \
-                obj_file=obj_file, \
-                url=twdh.address \
-            )
+            if spatial_full != None or spatial_simp != None:
 
-            #logecho( command, 'info' )
-            logecho( 'Dumping {}...\n'.format(obj_type), 'info' )
-            output = subprocess.getoutput(command)
-            logecho( output, 'info' )
-            logecho( 'Created snapshot file: {}'.format(obj_file), 'info' )
+                logecho( "Spatial data found for dataset \"{}\"".format(dataset['name']), "info" )
 
+                if confirm_all:
+                    if click.confirm("🟢 Proceed to patch dataset \"{}\"? ".format(dataset['name']), abort=False, default=True):
+                        run_patch = True
+                    else: 
+                        logecho( "Patch cancelled for dataset \"{}\"".format(dataset['name']), "warning" )
+                        run_patch = False
 
-        except FileNotFoundError:
-            logecho( "Unable to write JSONL / Destination not found error", 'error' )
-            sys.exit(1)
-        except Exception as e:
-            logecho( "An error occurred: {}".format(e), 'error' )
-            sys.exit(1)
+                if run_patch:
+                    if patch_fn_set_spatial_data( ctx, dataset, dataset.get('gazetteer', None)):
+                        logecho( "Patched dataset \"{}\"".format(dataset['name']), "info" )
+                    else:
+                        logecho( "Error patching dataset \"{}\"".format(dataset['name']), "info" )
 
+            else:
+                logecho( "No spatial data found for \"{}\"".format(dataset['name']), "info" )
 
-        logecho("Successfully dumped datasets to {}".format(obj_file), 'info')
+        else:
+            logecho( "No gazetteer attribute found for \"{}\"".format(dataset['name']), "info" )
 
-    logecho("Snapshot complete!", 'celebration')
+@twdhcli.command()
+@click.option('--new-size',
+              required=True,
+              default=32000,
+              help='Maximum size for spatial_simp')
+@click.option('--ids',
+              required=False,
+              default=None,
+              help='list of dataset ids to patch')
+@click.option('--confirm-each',
+              default=False,
+              is_flag=True,
+              help='Confirm each patch operation instead of just once at the start')
+@click.option('--allow-enlarge',
+              default=False,
+              is_flag=True,
+              help='Do not resize spatial_simp to be larger than it already is. This should be set to false in the case that for instance you resized to 4K and you want to resize back to 32K and not have the previously shrunk extents stay at their shrunken size.')
+@click.option('--skip-snapshot',
+              default=False,
+              is_flag=True,
+              help='Don\'t prompt for snapshot, and don\'t create a snapshot')
+
+@click.pass_context
+def update_spatial_simp(ctx, new_size, ids, confirm_each, allow_enlarge, skip_snapshot):
+    """
+    Update spatial_simp to new_size
+    """
+
+    twdh = ctx.obj['twdh']
+    logecho = ctx.obj['logecho']
+    test_run = ctx.obj['test_run']
+
+    if not skip_snapshot and click.confirm('🟢 Take a snapshot before running patches?', default=True):
+        h.snapshot( ctx, './twdh-snapshots' )
+    else:
+        logecho( "Skipped snapshot!", "warning" )
+
+    datasets = h.fetch_datasets(ctx, ids, "dataset")
+
+    # Confirm patch operation
+    if ids:
+        logecho( "Prepared to update spatial_simp in the following datasets", 'warning')
+        for dataset in datasets:
+            logecho( "- {} ({})".format(dataset.get("title"),dataset.get("id")), 'info')
+        if not confirm_each:
+            if click.confirm('🟢 Proceed with all updating spatial_simp?'):
+                logecho( "Proceeding with updating spatial_simp ...", "info" )
+            else: 
+                logecho( "Operation cancelled", "exit" )
+                sys.exit(0)
+    else:
+        if not confirm_each:
+            if click.confirm('🟢 Proceed with updating spatial_simp on {} {}s?'.format(len(datasets), "dataset")):
+                logecho( "Proceeding with updating spatial_simp ...", "info" )
+            else: 
+                logecho( "Operation cancelled", "exit" )
+                return
+
+    for dataset in datasets:
+        gazetteer = dataset.get("gazetteer", {})
+        if 'spatial_full' in gazetteer and gazetteer['spatial_full'] != None:
+            if not allow_enlarge and len(dataset["gazetteer"]["spatial_simp"].encode('utf-8')) < new_size:
+                logecho( "+ {} ({}) spatial_simp = {} already less than {}".format(dataset.get("title"),dataset.get("id"),len(dataset["gazetteer"]["spatial_simp"].encode('utf-8')),new_size), 'info')
+            else:
+
+                logecho( "About to patch {} ({})".format(dataset.get("title"),dataset.get("id")), 'info')
+                if confirm_each:
+                    if click.confirm('🟢 Proceed with update?'):
+                        logecho( "Proceeding with update ...", "info" )
+                    else: 
+                        logecho( "Update cancelled", "warning" )
+                        continue
+                try:
+                    if len(dataset["gazetteer"]["spatial_full"].encode('utf-8')) < new_size:
+                        logecho( " {} ({}) spatial_full = {} already less than {}, setting spatial_simp = spatial_full".format(dataset.get("title"),dataset.get("id"),len(dataset["gazetteer"]["spatial_simp"].encode('utf-8')),new_size), 'info')
+                        gazetteer['spatial_simp'] = gazetteer['spatial_full']
+                    else:
+                        #logecho( " updating {} ({})".format(dataset.get("title"),dataset.get("id")), 'info')
+                        gazetteer['spatial_simp'] = h.simplify_geojson_by_size(ctx,gazetteer['spatial_full'],new_size)
+
+                    if patch_fn_set_spatial_data(ctx,dataset,gazetteer):
+                        logecho( "Updated spatial_simp on dataset \"{}\"".format(dataset['name']), "info" )
+                    else:
+                        logecho( "Error updating spatial_simp on dataset \"{}\"".format(dataset['name']), "info" )
+                    
+
+                except Exception as e:
+                    logecho( e )
 
 @twdhcli.command()
 @click.option('--ids',
@@ -277,32 +683,11 @@ def show_datasets(ctx,ids):
     twdh = ctx.obj['twdh']
     logecho = ctx.obj['logecho']
 
-    datasets = fetch_datasets(ctx, ids)
+    datasets = h.fetch_datasets(ctx, ids)
 
     for dataset in datasets:
         logecho("{}: {}".format(dataset["name"], str(dataset)), 'info')
 
-@twdhcli.command()
-@click.option('--ids',
-              required=False,
-              default=None,
-              help='list of bad datasets')
-@click.pass_context
-def get_bad_datasets(ctx,ids):
-    """
-    Show datasets with invalid data_admin_approved field
-    """
-
-    twdh = ctx.obj['twdh']
-
-    datasets = fetch_datasets(ctx, ids)
-
-    ok_values = ['approved','unapproved']
-    for dataset in datasets:
-        if dataset['data_admin_approved'] not in ok_values:
-            print( dataset['name'] )
-            print( dataset['data_admin_approved'] )
-            #patch = twdh.action.package_patch( id=dataset.get("id"), data_admin_approved='unapproved' )
 
 @twdhcli.command()
 @click.option('--ids',
@@ -310,7 +695,7 @@ def get_bad_datasets(ctx,ids):
               default=None,
               help='dataset state report')
 @click.pass_context
-def get_dataset_state_report(ctx,ids):
+def dataset_state_report(ctx,ids):
     """
     Print a report of dataset states
     """
@@ -342,7 +727,7 @@ def get_dataset_state_report(ctx,ids):
                     s, 
                     p, 
                     result['count'] 
-                    ) )
+                ) )
 
     c = 0
     for r in results:
@@ -373,7 +758,7 @@ def get_unapproved_public_active_datasets(ctx,ids):
     )
     if results['count'] > 0:
         for result in results['results']:
-            print(result['id'])
+            logecho(result['id'], 'info')
     else:
         logecho( 'No unapproved, public, active datasets found. That\'s a good thing!', 'info' )
 
@@ -401,7 +786,7 @@ def get_approved_private_draft_datasets(ctx,ids):
     )
     if results['count'] > 0:
         for result in results['results']:
-            print(result['id'])
+            logecho(result['id'], 'info')
     else:
         logecho( 'No approved, private, draft datasets found. That\'s a good thing!', 'info' )
 
@@ -420,7 +805,7 @@ def show_applications(ctx,ids):
     twdh = ctx.obj['twdh']
     logecho = ctx.obj['logecho']
 
-    datasets = fetch_datasets(ctx, ids, 'application')
+    datasets = h.fetch_datasets(ctx, ids, 'application')
 
     for dataset in datasets:
         logecho("{}: {}".format(dataset["name"], str(dataset)), 'info')
@@ -440,11 +825,10 @@ def list_datasets(ctx,ids):
     twdh = ctx.obj['twdh']
     logecho = ctx.obj['logecho']
 
-    datasets = fetch_datasets(ctx, ids)
+    datasets = h.fetch_datasets(ctx, ids)
 
     for dataset in datasets:
         logecho(dataset["name"], 'info')
-
 
 
 @twdhcli.command()
@@ -461,7 +845,7 @@ def list_applications(ctx,ids):
     twdh = ctx.obj['twdh']
     logecho = ctx.obj['logecho']
 
-    datasets = fetch_datasets(ctx, ids, 'application')
+    datasets = h.fetch_datasets(ctx, ids, 'application')
 
     for dataset in datasets:
         logecho(dataset["name"], 'info')
@@ -487,371 +871,7 @@ def spatial_stats(ctx,ids,csvout,quiet):
     Get spatial stats of datasets and export them to a CSV
     """
 
-    _spatial_stats( ctx, ids, csvout, quiet )
-
-def _spatial_stats(ctx, ids, csvout, quiet):
-
-    twdh = ctx.obj['twdh']
-    logecho = ctx.obj['logecho']
-
-    datasets = fetch_datasets(ctx, ids)
-
-    dataset_count = 0
-    spatial_dataset_count = 0
-    nonspatial_dataset_count = 0
-    spatial_full_total = 0
-    spatial_simp_total = 0
-
-    csvdata = [['id','name','spatial_full_size','spatial_simp_size','spatial_simp_reduiction']]
-    for dataset in datasets:
-        if not quiet:
-            logecho("{}".format(dataset["name"] ), "info")
-        dataset_count += 1
-        spatial_full_size = 0
-        spatial_simp_size = 0
-        spatial_simp_reduction = 0
-        if "gazetteer" in dataset:
-            if dataset["gazetteer"]["spatial_full"] is not None:
-                spatial_full_size = len(dataset["gazetteer"]["spatial_full"].encode('utf-8'))
-                if not quiet:
-                    logecho("  spatial_full = {} bytes".format(spatial_full_size), "info")
-                spatial_full_total += spatial_full_size
-            if dataset["gazetteer"]["spatial_simp"] is not None:
-                spatial_simp_size = len(dataset["gazetteer"]["spatial_simp"].encode('utf-8'))
-                if not quiet:
-                    logecho("  spatial_simp = {} bytes".format(spatial_simp_size), "info")
-                spatial_simp_total += spatial_simp_size
-            if dataset["gazetteer"]["spatial_full"] is not None and dataset["gazetteer"]["spatial_full"] is not None:
-                spatial_dataset_count += 1
-                spatial_simp_reduction = ( 100 - ( ( spatial_simp_size / spatial_full_size ) * 100 ) )
-                if not quiet:
-                    logecho("  simplification reduction = {}%".format( spatial_simp_reduction ), "info")
-            else:
-                if not quiet:
-                    logecho("  no spatial data", "info")
-                nonspatial_dataset_count += 1
-        else:
-            if not quiet:
-                logecho("  no spatial data", "info")
-            nonspatial_dataset_count += 1
-
-        csvdata.append( [dataset['id'], dataset['name'], spatial_full_size, spatial_simp_size, spatial_simp_reduction] )
-
-    if not quiet:
-        logecho("-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-", "info")
-    logecho("{} spatial datasets".format(spatial_dataset_count), "info")
-    csvdata.insert(0,["# {} spatial datasets".format(spatial_dataset_count)])
-    logecho("{} nonspatial datasets".format(nonspatial_dataset_count), "info")
-    csvdata.insert(1,["# {} nonspatial datasets".format(nonspatial_dataset_count)])
-    logecho("spatial_full_total = {} bytes".format(spatial_full_total), "info")
-    csvdata.insert(2,["# spatial_full_total = {} bytes".format(spatial_full_total)])
-    logecho("spatial_simp_total = {} bytes".format(spatial_simp_total), "info")
-    csvdata.insert(3,["# spatial_simp_total = {} bytes".format(spatial_simp_total)])
-
-
-    if spatial_full_total > 0:
-        simplification_reduction = 100 - ( ( spatial_simp_total / spatial_full_total ) * 100 )
-    else:
-        simplification_reduction = 0
-    logecho("simplification reduction = {}%".format( simplification_reduction ), "info")
-    csvdata.insert(4,["# simplification reduction = {}%".format( simplification_reduction )])
-
-    try:
-        with open(csvout, 'w', newline='') as csvfile:
-            writer = csv.writer(csvfile)
-            writer.writerows(csvdata)
-    
-    except FileNotFoundError:
-        print("Unable to write CSV / File not found error")
-        sys.exit(1)
-    except Exception as e:
-        print(f"An unexpected error occurred, unable to write CSV: {e}")
-        sys.exit(1)
-
-@twdhcli.command()
-@click.option('--patch-fn',
-              required=True,
-              default=None,
-              help='patch function to apply')
-@click.option('--ids',
-              required=False,
-              default=None,
-              help='list of dataset ids to patch')
-@click.option('--patch-data',
-              required=False,
-              default=None,
-              help='JSON blob containing patch values')
-@click.option('--dataset-type',
-              required=False,
-              default="dataset",
-              help='dataset or application')
-@click.option('--confirm-each',
-              default=False,
-              is_flag=True,
-              help='Confirm each patch operation instead of just once at the start')
-@click.pass_context
-def patch_datasets(ctx, patch_fn, ids, patch_data, dataset_type, confirm_each):
-    """
-    Patch datasets
-    """
-
-    twdh = ctx.obj['twdh']
-    logecho = ctx.obj['logecho']
-    test_run = ctx.obj['test_run']
-
-    patch_fn_dict = get_patch_functions()
-
-    if patch_fn not in patch_fn_dict:
-        logecho( "Patch function does not exist: {}".format(patch_fn), "info" )
-        return
-
-    if click.confirm('🟢 Take a snapshot before running patches?', default=True):
-        _snapshot( ctx, './twdh-snapshots' )
-    else:
-        logecho( "Skipped snapshot!", "warning" )
-
-
-    datasets = fetch_datasets(ctx, ids, dataset_type)
-
-    # Confirm patch operation
-    if ids:
-        logecho( "+ Prepared to patch the following datasets", 'warning')
-        for dataset in datasets:
-            logecho( "  - {} ({})".format(dataset.get("title"),dataset.get("id")), 'info')
-        if not confirm_each:
-            if click.confirm('🟢 Proceed with all patches?', abort=True):
-                logecho( "Proceeding with patches ...", "info" )
-            else: 
-                logecho( "Operation cancelled", "exit" )
-    else:
-        if not confirm_each:
-            if click.confirm('🟢 Proceed with patching {} {}s?'.format(len(datasets), dataset_type)):
-                logecho( "Proceeding with patches ...", "info" )
-            else: 
-                logecho( "Operation cancelled", "exit" )
-                return
-
-    if patch_data:
-        try:
-            data_dict = json.loads(patch_data)
-        except json.JSONDecodeError:
-            print("Error: Could not decode JSON '{}'".format(patch_data))
-            return False
-        except Exception as e:
-            print("An unexpected error occurred: {}".format(e))
-            return False
-    else:
-        data_dict = {}
-
-    #print( data_dict )
-    #return
-
-
-    for dataset in datasets:
-        logecho( "+ About to patch {} ({})".format(dataset.get("title"),dataset.get("id")), 'info')
-        if confirm_each:
-            if click.confirm('🟢 Proceed with patch?'):
-                logecho( "    Proceeding with patch ...", "info" )
-            else: 
-                logecho( "    Patch cancelled", "warning" )
-                continue
-        try:
-            logecho( "    ... patching {} ({})".format(dataset.get("title"),dataset.get("id")), 'info')
-            # Run patch function
-            patch_fn_dict[patch_fn](twdh,dataset,data_dict)
-            logecho( "    ...... patched {} ({})".format(dataset.get("title"),dataset.get("id")), 'info')
-
-        except Exception as e:
-            print( e )
-
-    
-
-
-def patch_fn_example():
-    print('This is an example patch function')
-    #patch = twdh.action.package_patch( id=dataset.get("id") )
-    #patch = twdh.action.package_patch( id=dataset.get("id"), extras=[], data_admin_approved="approved" )
-    #patch = twdh.action.package_patch( id=dataset.get("id"), data_admin_approved="approved", end_date="", group=["water-use"] )
-    #patch = twdh.action.package_patch( id=dataset.get("id"), gazetteer= { "spatial_simp": "", "spatial_full": "", "place_keywords": "El Paso (City), Austin (City), Austin (County), ABCDEFGH" })
-
-
-def patch_fn_validate_datasets(remote,dataset,data):
-
-    patch = remote.action.package_patch( id=dataset.get("id") )
-
-def patch_fn_fix_empty_date_ranges(remote,dataset,data):
-
-    if 'date_range' in dataset:
-        print( dataset['date_range'] )
-        print( 'Date range exists, skipping ...' )
-    else:
-        print( 'No date range!' )
-        print( dataset['group'] )
-
-        patch = remote.action.package_patch( id=dataset.get("id"), date_range="no date range" )
-
-
-def patch_fn_clear_spatial_data(remote,dataset,data):
-
-    patch = remote.action.package_patch( id=dataset.get("id"), gazetteer="" )
-
-def patch_fn_set_spatial_data(remote,dataset,data):
-
-    #twdh = ctx.obj['twdh']
-    #logecho = ctx.obj['logecho']
-    #test_run = ctx.obj['test_run']
-
-    try:
-        spatial_simp = data.get('spatial_simp', '{}')
-        parsed_spatial_simp = json.loads(spatial_simp)
-    except json.JSONDecodeError as e:
-        print(f"JSON parsing error on spatial_simp: {e}, value: {spatial_simp}")
-
-    try:
-        spatial_full = data.get('spatial_full', '{}')
-        parsed_spatial_simp = json.loads(spatial_full)
-    except json.JSONDecodeError as e:
-        print(f"JSON parsing error on spatial_full: {e}, value: {spatial_full}")
-
-
-    try:
-        patch = remote.action.package_patch( id=dataset.get("id"), spatial_simp=spatial_simp, spatial_full=spatial_full )
-
-    except Exception as e:
-        if str(e) == 'Not found':
-            print( "Error: dataset {} not found".format(e))
-            return False
-        else:
-            print("Error: {}".format(e))
-            return False
-    return patch
-
-def patch_fn_clear_data_dictionary(remote,dataset,data):
-    patch = remote.action.package_patch( id=dataset.get("id"), data_dictionary="" )
-
-def patch_fn_set_title(remote,dataset,data):
-    patch = remote.action.package_patch( id=dataset.get("id"), title=data['title'] )
-
-def patch_fn_set_app_email(remote,dataset,data):
-    patch = remote.action.package_patch( id=dataset.get("id"), data_contact_email=data['email'] )
-
-def fetch_datasets(ctx,ids=None,package_type='dataset'):
-
-    twdh = ctx.obj['twdh']
-    logecho = ctx.obj['logecho']
-
-    if ids:
-        logecho('Fetching {}s: {}'.format(package_type,ids) )
-    else:
-        logecho('Fetching all {}s'.format(package_type))
-    datasets = []
-
-    if ids:
-        id_list = ids.split()
-        for id in id_list:
-            try:
-
-                dataset = twdh.action.package_show( id=id )
-                if dataset:
-                    datasets.append( dataset )
-            except Exception as e:
-                logecho( "Exception loading dataset {}: {}".format( id, e ), 'error')
-                exit(1)
-
-    else:
-            query = twdh.action.package_search(
-                rows=100000,
-                fq="type:{}".format(package_type),
-                include_drafts=True,
-                include_private=True
-            )
-            if query["count"] == 0:
-                logecho( "No datasets found", 'error')
-                exit(1)
-            else:
-                datasets=query["results"]
-
-    return datasets
-
-
-@twdhcli.command()
-@click.option('--patch-file',
-              required=True,
-              default=None,
-              help='JSON file containing patch data')
-@click.option('--confirm-each',
-              default=False,
-              is_flag=True,
-              help='Confirm each patch operation instead of just once at the start')
-@click.pass_context
-def restore_spatial(ctx, patch_file, confirm_each):
-    """
-    Restore spatial data to datasets
-    """
-
-    twdh = ctx.obj['twdh']
-    logecho = ctx.obj['logecho']
-
-    print( patch_file )
-    try:
-        with open(patch_file, "r") as file:
-            patch_data = json.load(file)
-    except FileNotFoundError:
-        print("Error: The file was not found.")
-        sys.exit(1)
-    except json.JSONDecodeError as e:
-        print(f"Error: Could not decode JSON from '{patch_file}'. Check if the file contains valid JSON.")
-        print( f"{e}" )
-        sys.exit(1)
-    except Exception as e:
-        print(f"An unexpected error occurred: {e}")
-        sys.exit(1)
-    logecho( "Restoring spatial data from {} ...".format(patch_file), "info" )
-
-    if not confirm_each:
-        logecho( "Hint: Use --confirm-each if you want to confirm one at a time", "note" )
-        if click.confirm('🟢 Proceed with all patches from {}? '.format(patch_file), abort=True):
-            logecho( "Proceeding with patches ...", "info" )
-        else: 
-            logecho( "Operation cancelled", "warning" )
-        confirm_all = False
-    else:
-        confirm_all = True
-
-    for dataset in patch_data['results']:
-
-        logecho( "🟣", "divider" )
-
-        if 'gazetteer' in dataset:
-
-            spatial_full = dataset['gazetteer'].get('spatial_full', None)
-            spatial_simp = dataset['gazetteer'].get('spatial_simp', None)
-
-            if spatial_full != None or spatial_simp != None:
-
-                logecho( "Spatial data found for dataset \"{}\"".format(dataset['name']), "info" )
-                #logecho( "  spatial_full: {}".format(spatial_simp[:50]), "info" )
-                #logecho( "  spatial_simp: {}".format(spatial_simp[:50]), "info" )
-
-                if confirm_all:
-                    if click.confirm("🟢 Proceed to patch dataset \"{}\"? ".format(dataset['name']), abort=False, default=True):
-                        if patch_fn_set_spatial_data( twdh, dataset, dataset.get('gazetteer', None)):
-                            logecho( "Patched dataset \"{}\"".format(dataset['name']), "info" )
-                        else:
-                            logecho( "Error patching dataset \"{}\"".format(dataset['name']), "info" )
-                    else: 
-                        logecho( "Patch cancelled for dataset \"{}\"".format(dataset['name']), "warning" )
-                else:
-                    if patch_fn_set_spatial_data( twdh, dataset, dataset.get('gazetteer', None)):
-                        logecho( "Patched dataset \"{}\"".format(dataset['name']), "info" )
-                    else:
-                        logecho( "Error patching dataset \"{}\"".format(dataset['name']), "info" )
-
-
-            else:
-                logecho( "No spatial data found for \"{}\"".format(dataset['name']), "info" )
-        else:
-            logecho( "No spatial data found for \"{}\"".format(dataset['name']), "info" )
+    h.spatial_stats( ctx, ids, csvout, quiet )
 
 
 if __name__ == '__main__':
