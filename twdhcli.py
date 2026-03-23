@@ -125,8 +125,7 @@ def twdhcli(ctx, host, apikey, test_run, quiet, debug, logfile):
             logger.debug(message)
             click.echo('🎉 ' + Fore.MAGENTA + message) if not quiet else True
         elif level == 'divider':
-            logger.debug(message)
-            click.echo(Fore.MAGENTA + message) if not quiet else True
+            click.echo('🟣 ' + Fore.MAGENTA + '-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-') if not quiet else True
         else:
             logger.info(message)
             click.echo(Fore.GREEN + message) if not quiet else True
@@ -385,7 +384,11 @@ def patch_fn_clear_spatial_data_full(ctx,dataset,data):
         if test_run:
             return False
 
-        remote.action.package_patch( id=dataset.get("id"), gazetteer="" )
+        gazetteer = dataset.get('gazetteer', {})
+        if 'spatial_full' in gazetteer:
+            gazetteer['spatial_full'] = ""
+
+        remote.action.package_patch( id=dataset.get("id"), spatial_simp=gazetteer['spatial_simp'], spatial_full=gazetteer['spatial_full'] )
 
     except Exception as e:
         if str(e) == 'Not found':
@@ -548,7 +551,7 @@ def restore_spatial(ctx, patch_file, confirm_each):
 
     for dataset in patch_data['results']:
 
-        logecho( "🟣", "divider" )
+        logecho( "", "divider" )
 
         run_patch = True
 
@@ -565,12 +568,12 @@ def restore_spatial(ctx, patch_file, confirm_each):
                     if click.confirm("🟢 Proceed to patch dataset \"{}\"? ".format(dataset['name']), abort=False, default=True):
                         run_patch = True
                     else: 
-                        logecho( "Patch cancelled for dataset \"{}\"".format(dataset['name']), "warning" )
+                        logecho( "Patch cancelled", "warning" )
                         run_patch = False
 
                 if run_patch:
                     if patch_fn_set_spatial_data( ctx, dataset, dataset.get('gazetteer', None)):
-                        logecho( "Patched dataset \"{}\"".format(dataset['name']), "info" )
+                        logecho( "... patched", "info" )
                     else:
                         logecho( "Error patching dataset \"{}\"".format(dataset['name']), "info" )
 

@@ -34,7 +34,7 @@ def snapshot(ctx,dest):
         logecho('An error occurred: {}'.e, level='error')
         sys.exit(1)
 
-    _spatial_stats( ctx, [], '{}/spatial-stats.csv'.format( snap_dest ), True )
+    spatial_stats( ctx, [], '{}/spatial-stats.csv'.format( snap_dest ), True )
 
     dataset_types = [ 'dataset', 'application' ]
 
@@ -100,7 +100,7 @@ def snapshot(ctx,dest):
     logecho("Snapshot complete!", 'celebration')
 
 
-def _spatial_stats(ctx, ids, csvout, quiet):
+def spatial_stats(ctx, ids, csvout, quiet):
 
     twdh = ctx.obj['twdh']
     logecho = ctx.obj['logecho']
@@ -112,6 +112,8 @@ def _spatial_stats(ctx, ids, csvout, quiet):
     nonspatial_dataset_count = 0
     spatial_full_total = 0
     spatial_simp_total = 0
+
+    logecho( "", "divider" )
 
     csvdata = [['id','name','spatial_full_size','spatial_simp_size','spatial_simp_reduction']]
     for dataset in datasets:
@@ -132,9 +134,14 @@ def _spatial_stats(ctx, ids, csvout, quiet):
             else:
                 spatial_simp_size = 0
 
-            if dataset["gazetteer"]["spatial_full"] is not None and dataset["gazetteer"]["spatial_full"] is not None:
+            if dataset["gazetteer"]["spatial_full"] is not None or dataset["gazetteer"]["spatial_simp"] is not None:
                 spatial_dataset_count += 1
-                spatial_simp_reduction = ( 100 - ( ( spatial_simp_size / spatial_full_size ) * 100 ) )
+                if spatial_full_size > 0:
+                  spatial_simp_reduction = '{}%'.format(round(( 100 - ( ( spatial_simp_size / spatial_full_size ) * 100 ) ), 2))
+                else:
+                  spatial_simp_reduction = 'n/a'
+                logecho("{} / spatial_full: {} / spatial_simp: {} / reduction: {}".format(dataset["name"], spatial_full_size, spatial_simp_size, spatial_simp_reduction ), "info")
+
             else:
                 nonspatial_dataset_count += 1
                 spatial_simp_reduction = 0
@@ -142,13 +149,10 @@ def _spatial_stats(ctx, ids, csvout, quiet):
         else:
             nonspatial_dataset_count += 1
 
-        if not quiet:
-            logecho("{} spatial_full:{} spatial_simp:{} reduction:{}".format(dataset["name"], spatial_full_size, spatial_simp_size, spatial_simp_reduction ), "info")
-
+    
         csvdata.append( [dataset['id'], dataset['name'], spatial_full_size, spatial_simp_size, spatial_simp_reduction] )
 
-    if not quiet:
-        logecho("-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-", "info")
+    logecho( "", "divider" )
     logecho("{} spatial datasets".format(spatial_dataset_count), "info")
     csvdata.insert(0,["# {} spatial datasets".format(spatial_dataset_count)])
     logecho("{} nonspatial datasets".format(nonspatial_dataset_count), "info")
@@ -163,8 +167,8 @@ def _spatial_stats(ctx, ids, csvout, quiet):
         simplification_reduction = 100 - ( ( spatial_simp_total / spatial_full_total ) * 100 )
     else:
         simplification_reduction = 0
-    logecho("simplification reduction = {}%".format( simplification_reduction ), "info")
-    csvdata.insert(4,["# simplification reduction = {}%".format( simplification_reduction )])
+    logecho("simplification reduction = {}%".format( round( simplification_reduction, 2 ) ), "info")
+    csvdata.insert(4,["# simplification reduction = {}%".format( round( simplification_reduction, 2 ) )])
 
     try:
         with open(csvout, 'w', newline='') as csvfile:
@@ -257,4 +261,3 @@ def simplify_geojson_by_size(ctx, json_data, max_bytes, tolerance_step=0.0001):
 
     logecho("Could not reach target size without losing too much detail. Current size={}".format(current_size), 'info')
     return json_data
-
