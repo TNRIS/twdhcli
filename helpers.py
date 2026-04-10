@@ -83,7 +83,8 @@ def snapshot(ctx,dest):
                 if "resources" in dataset:
                     for resource in dataset['resources']:
                         dd = twdh.action.data_dictionary_show( id=resource['id'] )
-                        json_file.write(json.dumps(dd) + '\n')
+                        if len(dd) > 0:
+                            json_file.write(json.dumps(dd) + '\n')
 
         logecho( 'Created snapshot file: {}'.format(dd_file), 'info' )
 
