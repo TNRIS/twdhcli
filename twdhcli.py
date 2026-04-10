@@ -51,6 +51,8 @@ def get_patch_functions():
         'clear_spatial_data_full': patch_fn_clear_spatial_data_full,
         'set_spatial_data': patch_fn_set_spatial_data,
         'fix_empty_date_ranges': patch_fn_fix_empty_date_ranges,
+        'fix_empty_date_ranges_and_update_types': patch_fn_fix_empty_date_ranges_and_update_types,
+        'fix_empty_date_ranges_and_collection_methods': patch_fn_fix_empty_date_ranges_and_collection_methods,
         'validate_datasets': patch_fn_validate_datasets,
 
     }
@@ -205,11 +207,17 @@ def snapshot(ctx,dest):
               default=False,
               is_flag=True,
               help='Don\'t prompt for snapshot, and don\'t create a snapshot')
+@click.option('--force',
+              default=False,
+              is_flag=True,
+              help='Don\'t bail out on errors when processing multiple datasets')
 @click.pass_context
-def patch_datasets(ctx, patch_fn, ids, patch_data, dataset_type, confirm_each, skip_snapshot):
+def patch_datasets(ctx, patch_fn, ids, patch_data, dataset_type, confirm_each, skip_snapshot, force):
     """
     Patch datasets
     """
+
+    ctx.obj['force'] = force
 
     twdh = ctx.obj['twdh']
     logecho = ctx.obj['logecho']
@@ -220,6 +228,9 @@ def patch_datasets(ctx, patch_fn, ids, patch_data, dataset_type, confirm_each, s
     if patch_fn not in patch_fn_dict:
         logecho( "Patch function does not exist: {}".format(patch_fn), "info" )
         return
+
+    if force:
+        logecho( "Force enabled, patch_datasets will continue processing after running into an error", "warning" )
 
     if not skip_snapshot and click.confirm('🟢 Take a snapshot before running patches?', default=True):
         h.snapshot( ctx, './twdh-snapshots' )
@@ -260,8 +271,10 @@ def patch_datasets(ctx, patch_fn, ids, patch_data, dataset_type, confirm_each, s
         data_dict = {}
         logecho( "Patch data is an empty dict", "warning" )
 
+    c = 0
     for dataset in datasets:
-        logecho( "About to patch {} ({})".format(dataset.get("title"),dataset.get("id")), 'info')
+        c += 1
+        logecho( "{}) About to patch {} ({})".format(c,dataset.get("title"),dataset.get("id")), 'info')
         if confirm_each:
             if click.confirm('🟢 Proceed with patch?'):
                 logecho( "Proceeding with patch ...", "info" )
@@ -310,6 +323,7 @@ def patch_fn_validate_datasets(ctx,dataset,data):
     remote = ctx.obj['twdh']
     logecho = ctx.obj['logecho']
     test_run = ctx.obj['test_run']
+    force = ctx.obj['force']
 
     try:
         if test_run:
@@ -318,8 +332,10 @@ def patch_fn_validate_datasets(ctx,dataset,data):
         remote.action.package_patch( id=dataset.get("id") )
 
     except Exception as e:
-        logecho( "Bailing out: Dataset {} does not validate: {}".format( dataset['name'], e ), 'error' )
-        sys.exit(1)
+        logecho( "Dataset {} does not validate: {}".format( dataset['name'], e ), 'error' )
+        if not force:
+            logecho( "Bailing out: enable --force to prevent bailouts", 'error' )
+            sys.exit(1)
 
     return True
 
@@ -341,6 +357,61 @@ def patch_fn_fix_empty_date_ranges(ctx,dataset,data):
                 return False
 
             remote.action.package_patch( id=dataset.get("id"), date_range="no date range" )
+
+        except Exception as e:
+            if str(e) == 'Not found':
+                logecho( "Error: dataset {} not found".format(dataset.get("id")), 'error')
+                return False
+            else:
+                logecho("Error: {}".format(e), 'error')
+                return False
+    return True
+
+def patch_fn_fix_empty_date_ranges_and_update_types(ctx,dataset,data):
+
+    remote = ctx.obj['twdh']
+    logecho = ctx.obj['logecho']
+    test_run = ctx.obj['test_run']
+
+    if 'date_range' in dataset:
+        logecho( dataset['date_range'], 'info' )
+        logecho( 'Date range exists, skipping ...', 'info' )
+    else:
+        logecho( 'No date range!', 'info' )
+
+        try:
+            if test_run:
+                return False
+
+            remote.action.package_patch( id=dataset.get("id"), date_range="no date range", update_type="none", primary_tags = 'administrative', tag_string='administrative' )
+
+        except Exception as e:
+            if str(e) == 'Not found':
+                logecho( "Error: dataset {} not found".format(dataset.get("id")), 'error')
+                return False
+            else:
+                logecho("Error: {}".format(e), 'error')
+                return False
+    return True
+
+
+def patch_fn_fix_empty_date_ranges_and_collection_methods(ctx,dataset,data):
+
+    remote = ctx.obj['twdh']
+    logecho = ctx.obj['logecho']
+    test_run = ctx.obj['test_run']
+
+    if 'date_range' in dataset:
+        logecho( dataset['date_range'], 'info' )
+        logecho( 'Date range exists, skipping ...', 'info' )
+    else:
+        logecho( 'No date range!', 'info' )
+
+        try:
+            if test_run:
+                return False
+
+            remote.action.package_patch( id=dataset.get("id"), date_range="no date range", collection_method="survey" )
 
         except Exception as e:
             if str(e) == 'Not found':

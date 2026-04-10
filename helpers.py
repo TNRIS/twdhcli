@@ -34,11 +34,17 @@ def snapshot(ctx,dest):
         logecho('An error occurred: {}'.e, level='error')
         sys.exit(1)
 
+    ##########################################
+    # Create spatial stats report
+    ##########################################
     spatial_stats( ctx, [], '{}/spatial-stats.csv'.format( snap_dest ), True )
 
+    ##########################################
+    # Create human readable dataset and 
+    # application backups
+    ##########################################
     dataset_types = [ 'dataset', 'application' ]
 
-    # Create human readable dataset and application backups
     for dataset_type in dataset_types:
         dataset_file = '{}/{}s.json'.format(snap_dest, dataset_type) 
         results = twdh.action.package_search(
@@ -60,18 +66,80 @@ def snapshot(ctx,dest):
             logecho( "An unexpected error occurred, unable to write JSON: {}".format(e), 'error' )
             sys.exit(1)
 
-    # Create JSONL backups of datasets, applications, organizations, users. Datasets include type 'dataset' and 'application' all in the same file.
-    obj_types = [ 'datasets', 'groups', 'organizations', 'users']
+    ##########################################
+    # Create resource 'data dictionary' backup
+    ##########################################
+    dd_file = '{}/data-dicts.jsonl'.format(snap_dest) 
+    results = twdh.action.package_search(
+        rows=100000,
+        fq="type:dataset",
+        include_deleted=True,
+        include_drafts=True,
+        include_private=True
+    )
+    try:
+        with open(dd_file, 'w') as json_file:
+            for dataset in results['results']:
+                if "resources" in dataset:
+                    for resource in dataset['resources']:
+                        dd = twdh.action.data_dictionary_show( id=resource['id'] )
+                        json_file.write(json.dumps(dd) + '\n')
+
+        logecho( 'Created snapshot file: {}'.format(dd_file), 'info' )
+
+    except FileNotFoundError:
+        logecho( "Unable to write JSON / Destination not found error", 'error' )
+        sys.exit(1)
+    except Exception as e:
+        logecho( "An unexpected error occurred: {}".format(e), 'error' )
+        sys.exit(1)
+
+
+
+    ##########################################
+    # Create resource 'views' backup
+    ##########################################
+    v_file = '{}/resource-views.jsonl'.format(snap_dest) 
+    results = twdh.action.package_search(
+        rows=100000,
+        fq="type:dataset",
+        include_deleted=True,
+        include_drafts=True,
+        include_private=True
+    )
+    try:
+        with open(v_file, 'w') as json_file:
+            for dataset in results['results']:
+                if "resources" in dataset:
+                    for resource in dataset['resources']:
+                        views = twdh.action.resource_view_list( id=resource['id'] )
+                        if len(views) > 0:
+                            json_file.write(json.dumps(views) + '\n')
+
+        logecho( 'Created snapshot file: {}'.format(v_file), 'info' )
+
+    except FileNotFoundError:
+        logecho( "Unable to write JSON / Destination not found error", 'error' )
+        sys.exit(1)
+    except Exception as e:
+        logecho( "An unexpected error occurred: {}".format(e), 'error' )
+        #sys.exit(1)
+
+    ##########################################
+    # Create JSONL backups of datasets, 
+    # applications, organizations, users. 
+    # Datasets include type 'dataset' and 
+    # 'application' all in the same file.
+    ##########################################
+    obj_types = [ 
+        'datasets', 
+        'groups', 
+        'organizations', 
+        'users'
+    ]
     for obj_type in obj_types:
         obj_file = '{}/{}.jsonl'.format(snap_dest, obj_type)
         try:
-
-            """
-            # I would like to use the 'dump' functionality of ckanapi here but I can't figure out how to make it work, so I'll call the command instead for now
-            with open(obj_file, 'w') as jsonl_file:
-                for item in twdh.dump_things(obj_type):
-                    jsonl_file.write(json.dumps(item) + '\n')
-            """
 
             command = "ckanapi dump {obj_type} --apikey={apikey} --all -O {obj_file} -r {url}".format( \
                 obj_type=obj_type, \
@@ -96,7 +164,7 @@ def snapshot(ctx,dest):
 
 
         logecho("Successfully dumped datasets to {}".format(obj_file), 'info')
-
+    
     logecho("Snapshot complete!", 'celebration')
 
 
