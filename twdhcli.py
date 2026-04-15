@@ -54,6 +54,7 @@ def get_patch_functions():
         'fix_empty_date_ranges_and_update_types': patch_fn_fix_empty_date_ranges_and_update_types,
         'fix_empty_date_ranges_and_collection_methods': patch_fn_fix_empty_date_ranges_and_collection_methods,
         'validate_datasets': patch_fn_validate_datasets,
+        'fix_place_keywords': patch_fn_fix_place_keywords,
 
     }
 
@@ -317,6 +318,52 @@ def patch_fn_example(ctx,dataset,data):
 
     return True
 
+
+def patch_fn_fix_place_keywords(ctx,dataset,data):
+
+    remote = ctx.obj['twdh']
+    logecho = ctx.obj['logecho']
+    test_run = ctx.obj['test_run']
+
+    extras = dataset.get("extras",{})
+    found = False
+    for extra in extras:
+        if extra.get('key') == 'placeKeywords':
+            place_keywords = extra.get('value','')
+            logecho( "{}".format( place_keywords ) )
+
+            if place_keywords == 'Statewide':
+                place_keywords = 'Texas'
+
+            try:
+                if test_run:
+                    return False
+
+                remote.action.package_patch( id=dataset.get("id"), place_keywords="{}".format( place_keywords ) )
+
+            except Exception as e:
+                if str(e) == 'Not found':
+                    logecho( "Error: dataset {} not found".format(dataset.get("id")), 'error')
+                    return False
+                else:
+                    logecho("Error: {}".format(e), 'error')
+                    return False
+            
+            """
+            if dataset.get('place_keywords'):
+                logecho( "place_keywords={}".format( dataset.get("place_keywords") ) )
+            else:
+                logecho( "No root place_keywords" )
+            gazetteer = dataset.get('gazetteer','')
+            if gazetteer.get('place_keywords'):
+                logecho( "gazetteer={}".format( gazetteer.get('place_keywords') ) )
+            else:
+                logecho( "No gazetteer place_keywords" )
+            """
+                
+            found = True
+
+    return True
 
 def patch_fn_validate_datasets(ctx,dataset,data):
 
