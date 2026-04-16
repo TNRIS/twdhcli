@@ -480,7 +480,7 @@ def patch_fn_clear_spatial_data(ctx,dataset,data):
         if test_run:
             return False
 
-        remote.action.package_patch( id=dataset.get("id"), gazetteer="" )
+        remote.action.package_patch( id=dataset.get("id"), spatial_extent="", spatial_full="" )
 
     except Exception as e:
         if str(e) == 'Not found':
@@ -502,11 +502,7 @@ def patch_fn_clear_spatial_data_full(ctx,dataset,data):
         if test_run:
             return False
 
-        gazetteer = dataset.get('gazetteer', {})
-        if 'spatial_full' in gazetteer:
-            gazetteer['spatial_full'] = ""
-
-        remote.action.package_patch( id=dataset.get("id"), spatial_simp=gazetteer['spatial_simp'], spatial_full=gazetteer['spatial_full'] )
+        remote.action.package_patch( id=dataset.get("id"), spatial_extent="", spatial_full="" )
 
     except Exception as e:
         if str(e) == 'Not found':
@@ -525,16 +521,17 @@ def patch_fn_set_spatial_data(ctx,dataset,data):
     logecho = ctx.obj['logecho']
     test_run = ctx.obj['test_run']
 
+    spatial_extent = data.get('spatial_extent') or data.get('spatial_simp', '{}')
+    spatial_full = data.get('spatial_full', '{}')
+
     try:
-        spatial_simp = data.get('spatial_simp', '{}')
-        parsed_spatial_simp = json.loads(spatial_simp)
+        json.loads(spatial_extent)
 
     except json.JSONDecodeError as e:
-        logecho(f"JSON parsing error on spatial_simp: {e}, value: {spatial_simp}", 'error')
+        logecho(f"JSON parsing error on spatial_simp: {e}, value: {spatial_extent}", 'error')
 
     try:
-        spatial_full = data.get('spatial_full', '{}')
-        parsed_spatial_simp = json.loads(spatial_full)
+        json.loads(spatial_full)
 
     except json.JSONDecodeError as e:
         logecho(f"JSON parsing error on spatial_full: {e}, value: {spatial_full}",'error')
@@ -543,7 +540,7 @@ def patch_fn_set_spatial_data(ctx,dataset,data):
         if test_run:
             return False
 
-        remote.action.package_patch( id=dataset.get("id"), spatial_simp=spatial_simp, spatial_full=spatial_full )
+        remote.action.package_patch( id=dataset.get("id"), spatial_extent=spatial_extent, spatial_full=spatial_full )
 
     except Exception as e:
         if str(e) == 'Not found':
@@ -673,33 +670,36 @@ def restore_spatial(ctx, patch_file, confirm_each):
 
         run_patch = True
 
-        if 'gazetteer' in dataset:
+        spatial_full = None
+        spatial_extent = None
+        if not spatial_extent:
+            spatial_extent = dataset.get('spatial_extent')
+        if not spatial_full:
+            spatial_full = dataset.get('spatial_full')   
 
-            spatial_full = dataset['gazetteer'].get('spatial_full', None)
-            spatial_simp = dataset['gazetteer'].get('spatial_simp', None)
+        if spatial_full != None or spatial_extent != None:
 
-            if spatial_full != None or spatial_simp != None:
+            logecho( "Spatial data found for dataset \"{}\"".format(dataset['name']), "info" )
 
-                logecho( "Spatial data found for dataset \"{}\"".format(dataset['name']), "info" )
+            if confirm_all:
+                if click.confirm("🟢 Proceed to patch dataset \"{}\"? ".format(dataset['name']), abort=False, default=True):
+                    run_patch = True
+                else: 
+                    logecho( "Patch cancelled", "warning" )
+                    run_patch = False
 
-                if confirm_all:
-                    if click.confirm("🟢 Proceed to patch dataset \"{}\"? ".format(dataset['name']), abort=False, default=True):
-                        run_patch = True
-                    else: 
-                        logecho( "Patch cancelled", "warning" )
-                        run_patch = False
-
-                if run_patch:
-                    if patch_fn_set_spatial_data( ctx, dataset, dataset.get('gazetteer', None)):
-                        logecho( "... patched", "info" )
-                    else:
-                        logecho( "Error patching dataset \"{}\"".format(dataset['name']), "info" )
-
-            else:
-                logecho( "No spatial data found for \"{}\"".format(dataset['name']), "info" )
+            if run_patch:
+                if patch_fn_set_spatial_data( ctx, dataset, {
+                        "spatial_extent": spatial_extent,
+                        "spatial_full": spatial_full
+                    }):
+                    logecho( "... patched", "info" )
+                else:
+                    logecho( "Error patching dataset \"{}\"".format(dataset['name']), "info" )
 
         else:
-            logecho( "No gazetteer attribute found for \"{}\"".format(dataset['name']), "info" )
+            logecho( "No spatial data found for \"{}\"".format(dataset['name']), "info" )
+
 
 @twdhcli.command()
 @click.option('--new-size',
@@ -760,10 +760,12 @@ def update_spatial_simp(ctx, new_size, ids, confirm_each, allow_enlarge, skip_sn
                 return
 
     for dataset in datasets:
-        gazetteer = dataset.get("gazetteer", {})
-        if 'spatial_full' in gazetteer and gazetteer['spatial_full'] != None:
-            if not allow_enlarge and len(dataset["gazetteer"]["spatial_simp"].encode('utf-8')) < new_size:
-                logecho( "+ {} ({}) spatial_simp = {} already less than {}".format(dataset.get("title"),dataset.get("id"),len(dataset["gazetteer"]["spatial_simp"].encode('utf-8')),new_size), 'info')
+        spatial_full = dataset.get("spatial_full")
+        spatial_extent = dataset.get("spatial_extent")
+
+        if spatial_full:
+            if not allow_enlarge and spatial_extent and len(spatial_extent.encode('utf-8')) < new_size:
+                logecho( "+ {} ({}) spatial_simp = {} already less than {}".format(dataset.get("title"),dataset.get("id"),len(spatial_extent.encode('utf-8')),new_size), 'info')
             else:
 
                 logecho( "About to patch {} ({})".format(dataset.get("title"),dataset.get("id")), 'info')
@@ -774,14 +776,15 @@ def update_spatial_simp(ctx, new_size, ids, confirm_each, allow_enlarge, skip_sn
                         logecho( "Update cancelled", "warning" )
                         continue
                 try:
-                    if len(dataset["gazetteer"]["spatial_full"].encode('utf-8')) < new_size:
-                        logecho( " {} ({}) spatial_full = {} already less than {}, setting spatial_simp = spatial_full".format(dataset.get("title"),dataset.get("id"),len(dataset["gazetteer"]["spatial_simp"].encode('utf-8')),new_size), 'info')
-                        gazetteer['spatial_simp'] = gazetteer['spatial_full']
+                    if len(spatial_full.encode('utf-8')) < new_size:
+                        new_spatial_extent = spatial_full
                     else:
-                        #logecho( " updating {} ({})".format(dataset.get("title"),dataset.get("id")), 'info')
-                        gazetteer['spatial_simp'] = h.simplify_geojson_by_size(ctx,gazetteer['spatial_full'],new_size)
+                        new_spatial_extent = h.simplify_geojson_by_size(spatial_full, new_size)
 
-                    if patch_fn_set_spatial_data(ctx,dataset,gazetteer):
+                    if patch_fn_set_spatial_data(ctx,dataset,{
+                                                    "spatial_extent": new_spatial_extent,
+                                                    "spatial_full": spatial_full
+                                                }):
                         logecho( "Updated spatial_simp on dataset \"{}\"".format(dataset['name']), "info" )
                     else:
                         logecho( "Error updating spatial_simp on dataset \"{}\"".format(dataset['name']), "info" )
