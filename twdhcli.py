@@ -859,12 +859,8 @@ def dataset_state_report(ctx,ids):
     logecho('{} datasets'.format(c))
 
 @twdhcli.command()
-@click.option('--ids',
-              required=False,
-              default=None,
-              help='list of unapproved public active datasets')
 @click.pass_context
-def get_unapproved_public_active_datasets(ctx,ids):
+def get_unapproved_public_active_datasets(ctx):
     """
     Show unapproved public active datasets
     """
@@ -887,12 +883,8 @@ def get_unapproved_public_active_datasets(ctx,ids):
         logecho( 'No unapproved, public, active datasets found. That\'s a good thing!', 'info' )
 
 @twdhcli.command()
-@click.option('--ids',
-              required=False,
-              default=None,
-              help='list of approved private draft datasets')
 @click.pass_context
-def get_approved_private_draft_datasets(ctx,ids):
+def get_approved_private_draft_datasets(ctx):
     """
     Show approved private draft datasets
     """
