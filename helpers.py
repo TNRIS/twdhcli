@@ -3,6 +3,7 @@ import sys
 import csv
 import json
 import subprocess
+import traceback
 
 from datetime import datetime, date
 
@@ -12,6 +13,21 @@ from urllib.parse import urlparse
 from shapely import from_geojson, to_geojson
 from shapely.geometry import shape, mapping, MultiPolygon, Polygon
 from shapely.ops import unary_union
+
+
+def apikey_validates(ctx,apikey):
+
+    twdh = ctx.obj['twdh']
+    logecho = ctx.obj['logecho']
+
+    try:
+        results = twdh.action.user_list()
+        logecho('API Key test passed', level='info')
+        return True
+    except Exception as e:
+        logecho('API Key is not valid ', level='error')
+        #print(traceback.format_exc())
+        sys.exit(1)
 
 
 def snapshot(ctx,dest):
@@ -142,25 +158,38 @@ def snapshot(ctx,dest):
         obj_file = '{}/{}.jsonl'.format(snap_dest, obj_type)
         try:
 
+            """
             command = "ckanapi dump {obj_type} --apikey={apikey} --all -O {obj_file} -r {url}".format( \
                 obj_type=obj_type, \
                 apikey=twdh.apikey, \
                 obj_file=obj_file, \
                 url=twdh.address \
             )
+            """
 
+            command = [
+                "ckanapi",
+                "dump", "{obj_type}".format(obj_type=obj_type),
+                "--apikey={apikey}".format(apikey=twdh.apikey),
+                "--all",
+                "-O", "{obj_file}".format(obj_file=obj_file),
+                "-r", "{url}".format(url=twdh.address)
+            ]
+
+
+            #breakpoint()
             #logecho( command, 'info' )
             logecho( 'Dumping {}...\n'.format(obj_type), 'info' )
-            output = subprocess.getoutput(command)
-            logecho( output, 'info' )
+            subprocess.check_call(command)
             logecho( 'Created snapshot file: {}'.format(obj_file), 'info' )
 
 
-        except FileNotFoundError:
-            logecho( "Unable to write JSONL / Destination not found error", 'error' )
-            sys.exit(1)
+        #except FileNotFoundError:
+            #logecho( "Unable to write JSONL / Destination not found error", 'error' )
+            #sys.exit(1)
         except Exception as e:
             logecho( "An error occurred: {}".format(e), 'error' )
+            print(traceback.format_exc())
             sys.exit(1)
 
 

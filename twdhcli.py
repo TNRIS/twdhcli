@@ -146,6 +146,7 @@ def twdhcli(ctx, host, apikey, test_run, quiet, debug, logfile):
         if apikey == None:
             logecho("Cannot continue: --apikey parameter not set and APIKEY not found in .env.secrets","error")
             exit(1)
+
     logecho("apikey set", "detail")
 
     if host == None:
@@ -169,6 +170,11 @@ def twdhcli(ctx, host, apikey, test_run, quiet, debug, logfile):
     ctx.obj['logecho'] = logecho
     ctx.obj['test_run'] = test_run
 
+    if not h.apikey_validates(ctx,apikey):
+        logecho("Cannot continue: --apikey parameter value is not a valid key","error")
+        exit(1)
+
+
 @twdhcli.command()
 @click.option('--dest',
               type=click.Path(),
@@ -181,6 +187,24 @@ def snapshot(ctx,dest):
     Create JSON snapshot files for datasets, applications and organizations
     """
     h.snapshot(ctx,dest)
+
+
+@twdhcli.command()
+@click.pass_context
+def list_patch_functions(ctx ):
+    """
+    Patch datasets
+    """
+
+    twdh = ctx.obj['twdh']
+    logecho = ctx.obj['logecho']
+    test_run = ctx.obj['test_run']
+
+    patch_fn_dict = get_patch_functions()
+
+    for patch_fn in patch_fn_dict:
+        logecho( "{}".format(patch_fn), "info" )
+
 
 
 @twdhcli.command()
@@ -528,7 +552,7 @@ def patch_fn_set_spatial_data(ctx,dataset,data):
         json.loads(spatial_extent)
 
     except json.JSONDecodeError as e:
-        logecho(f"JSON parsing error on spatial_simp: {e}, value: {spatial_extent}", 'error')
+        logecho(f"JSON parsing error on spatial_extent: {e}, value: {spatial_extent}", 'error')
 
     try:
         json.loads(spatial_full)
