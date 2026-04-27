@@ -654,6 +654,85 @@ def patch_fn_set_app_email(ctx,dataset,data):
               is_flag=True,
               help='Confirm each patch operation instead of just once at the start')
 @click.pass_context
+def migrate_spatial(ctx, patch_file, confirm_each):
+    """
+    RestoreMigrate spatial data to remove old GZTR model and use new model with dedicated table for `spatial_full` and move `gazettteer.spatial_simp` to `spatial_extent`
+    """
+
+    twdh = ctx.obj['twdh']
+    logecho = ctx.obj['logecho']
+
+    try:
+        with open(patch_file, "r") as file:
+            patch_data = json.load(file)
+    except FileNotFoundError:
+        logecho("Error: The file was not found.", 'error')
+        sys.exit(1)
+    except json.JSONDecodeError as e:
+        logecho(f"Error: Could not decode JSON from '{patch_file}'. Check if the file contains valid JSON.", 'error')
+        logecho( f"{e}", 'error' )
+        sys.exit(1)
+    except Exception as e:
+        logecho(f"An unexpected error occurred: {e}", 'error')
+        sys.exit(1)
+    logecho( "Restoring spatial data from {} ...".format(patch_file), "info" )
+
+    if not confirm_each:
+        logecho( "Hint: Use --confirm-each if you want to confirm one at a time", "note" )
+        if click.confirm('🟢 Proceed with all patches from {}? '.format(patch_file)):
+            logecho( "Proceeding with patches ...", "info" )
+        else: 
+            logecho( "Operation cancelled", "warning" )
+            sys.exit(0)
+        confirm_all = False
+    else:
+        confirm_all = True
+
+    for dataset in patch_data['results']:
+
+        logecho( "", "divider" )
+
+        run_patch = True
+
+        if 'gazetteer' in dataset:
+
+            old_spatial_full = dataset['gazetteer'].get('spatial_full', None)
+            old_spatial_simp = dataset['gazetteer'].get('spatial_simp', None)
+
+            if old_spatial_full != None or old_spatial_simp != None:
+                
+                logecho( "Spatial data found for dataset \"{}\"".format(dataset['name']), "info" )
+
+                if confirm_all:
+                    if click.confirm("🟢 Proceed to patch dataset \"{}\"? ".format(dataset['name']), abort=False, default=True):
+                        run_patch = True
+                    else: 
+                        logecho( "Patch cancelled", "warning" )
+                        run_patch = False
+
+                if run_patch:
+                    if patch_fn_set_spatial_data( ctx, dataset, {
+                            "spatial_extent": old_spatial_simp,
+                            "spatial_full": old_spatial_full
+                        }):
+                        logecho( "... patched", "info" )
+                    else:
+                        logecho( "Error patching dataset \"{}\"".format(dataset['name']), "info" )
+
+            else:
+                logecho( "No spatial data found for \"{}\"".format(dataset['name']), "info" )
+
+
+@twdhcli.command()
+@click.option('--patch-file',
+              required=True,
+              default=None,
+              help='JSON file containing patch data')
+@click.option('--confirm-each',
+              default=False,
+              is_flag=True,
+              help='Confirm each patch operation instead of just once at the start')
+@click.pass_context
 def restore_spatial(ctx, patch_file, confirm_each):
     """
     Restore spatial data to datasets
