@@ -545,6 +545,7 @@ def patch_fn_set_spatial_data(ctx,dataset,data):
     logecho = ctx.obj['logecho']
     test_run = ctx.obj['test_run']
 
+    breakpoint()
     spatial_extent = data.get('spatial_extent') or data.get('spatial_simp', '{}')
     spatial_full = data.get('spatial_full', '{}')
 
@@ -653,8 +654,12 @@ def patch_fn_set_app_email(ctx,dataset,data):
               default=False,
               is_flag=True,
               help='Confirm each patch operation instead of just once at the start')
+@click.option('--ids',
+              required=False,
+              default=None,
+              help='Space-separated list of dataset ids to patch')
 @click.pass_context
-def migrate_spatial(ctx, patch_file, confirm_each):
+def migrate_spatial(ctx, patch_file, confirm_each, ids):
     """
     RestoreMigrate spatial data to remove old GZTR model and use new model with dedicated table for `spatial_full` and move `gazettteer.spatial_simp` to `spatial_extent`
     """
@@ -677,6 +682,12 @@ def migrate_spatial(ctx, patch_file, confirm_each):
         sys.exit(1)
     logecho( "Restoring spatial data from {} ...".format(patch_file), "info" )
 
+    if ids is not None:
+        dataset_filter = ids.split(' ')
+        logecho( "Limiting migration to the following datasets: {}".format(ids), 'info' )
+    else:
+        dataset_filter = []
+
     if not confirm_each:
         logecho( "Hint: Use --confirm-each if you want to confirm one at a time", "note" )
         if click.confirm('🟢 Proceed with all patches from {}? '.format(patch_file)):
@@ -692,36 +703,43 @@ def migrate_spatial(ctx, patch_file, confirm_each):
 
         logecho( "", "divider" )
 
-        run_patch = True
+        if len(dataset_filter) == 0 or dataset.get('id') in dataset_filter or dataset.get('name') in dataset_filter:
+            logecho( "Migrating {}".format( dataset['name'] ), 'info' )
 
-        if 'gazetteer' in dataset:
+            run_patch = True
 
-            old_spatial_full = dataset['gazetteer'].get('spatial_full', None)
-            old_spatial_simp = dataset['gazetteer'].get('spatial_simp', None)
+            if 'gazetteer' in dataset:
 
-            if old_spatial_full != None or old_spatial_simp != None:
-                
-                logecho( "Spatial data found for dataset \"{}\"".format(dataset['name']), "info" )
+                old_spatial_full = dataset['gazetteer'].get('spatial_full', None)
+                old_spatial_simp = dataset['gazetteer'].get('spatial_simp', None)
 
-                if confirm_all:
-                    if click.confirm("🟢 Proceed to patch dataset \"{}\"? ".format(dataset['name']), abort=False, default=True):
-                        run_patch = True
-                    else: 
-                        logecho( "Patch cancelled", "warning" )
-                        run_patch = False
+                if old_spatial_full != None or old_spatial_simp != None:
+                    
+                    logecho( "Spatial data found for dataset \"{}\"".format(dataset['name']), "info" )
 
-                if run_patch:
-                    if patch_fn_set_spatial_data( ctx, dataset, {
-                            "spatial_extent": old_spatial_simp,
-                            "spatial_full": old_spatial_full
-                        }):
-                        logecho( "... patched", "info" )
-                    else:
-                        logecho( "Error patching dataset \"{}\"".format(dataset['name']), "info" )
+                    if confirm_all:
+                        if click.confirm("🟢 Proceed to patch dataset \"{}\"? ".format(dataset['name']), abort=False, default=True):
+                            run_patch = True
+                        else: 
+                            logecho( "Patch cancelled", "warning" )
+                            run_patch = False
 
+                    if run_patch:
+                        if patch_fn_set_spatial_data( ctx, dataset, {
+                                "spatial_simp": old_spatial_simp,
+                                "spatial_full": old_spatial_full
+                            }):
+                            logecho( "... patched", "info" )
+                        else:
+                            logecho( "Error patching dataset \"{}\"".format(dataset['name']), "info" )
+
+                else:
+                    logecho( "No spatial data found in gazetteer attribute for \"{}\"".format(dataset['name']), "info" )
             else:
-                logecho( "No spatial data found for \"{}\"".format(dataset['name']), "info" )
+                logecho( "No gazetteer attribute found", "info" )
 
+        else:
+            logecho( "Skipping because not found in filter: \"{}\"".format(dataset['name']), "info" )
 
 @twdhcli.command()
 @click.option('--patch-file',
