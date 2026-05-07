@@ -3,6 +3,7 @@ import sys
 import csv
 import json
 import subprocess
+import traceback
 
 from datetime import datetime, date
 
@@ -12,6 +13,21 @@ from urllib.parse import urlparse
 from shapely import from_geojson, to_geojson
 from shapely.geometry import shape, mapping, MultiPolygon, Polygon
 from shapely.ops import unary_union
+
+
+def apikey_validates(ctx,apikey):
+
+    twdh = ctx.obj['twdh']
+    logecho = ctx.obj['logecho']
+
+    try:
+        results = twdh.action.user_list()
+        logecho('API Key test passed', level='info')
+        return True
+    except Exception as e:
+        logecho('API Key is not valid ', level='error')
+        #print(traceback.format_exc())
+        sys.exit(1)
 
 
 def snapshot(ctx,dest):
@@ -142,25 +158,38 @@ def snapshot(ctx,dest):
         obj_file = '{}/{}.jsonl'.format(snap_dest, obj_type)
         try:
 
+            """
             command = "ckanapi dump {obj_type} --apikey={apikey} --all -O {obj_file} -r {url}".format( \
                 obj_type=obj_type, \
                 apikey=twdh.apikey, \
                 obj_file=obj_file, \
                 url=twdh.address \
             )
+            """
 
+            command = [
+                "ckanapi",
+                "dump", "{obj_type}".format(obj_type=obj_type),
+                "--apikey={apikey}".format(apikey=twdh.apikey),
+                "--all",
+                "-O", "{obj_file}".format(obj_file=obj_file),
+                "-r", "{url}".format(url=twdh.address)
+            ]
+
+
+            #breakpoint()
             #logecho( command, 'info' )
             logecho( 'Dumping {}...\n'.format(obj_type), 'info' )
-            output = subprocess.getoutput(command)
-            logecho( output, 'info' )
+            subprocess.check_call(command)
             logecho( 'Created snapshot file: {}'.format(obj_file), 'info' )
 
 
-        except FileNotFoundError:
-            logecho( "Unable to write JSONL / Destination not found error", 'error' )
-            sys.exit(1)
+        #except FileNotFoundError:
+            #logecho( "Unable to write JSONL / Destination not found error", 'error' )
+            #sys.exit(1)
         except Exception as e:
             logecho( "An error occurred: {}".format(e), 'error' )
+            print(traceback.format_exc())
             sys.exit(1)
 
 
@@ -180,7 +209,7 @@ def spatial_stats(ctx, ids, csvout, quiet):
     spatial_dataset_count = 0
     nonspatial_dataset_count = 0
     spatial_full_total = 0
-    spatial_simp_total = 0
+    spatial_extent_total = 0
 
     logecho( "", "divider" )
 
@@ -188,38 +217,42 @@ def spatial_stats(ctx, ids, csvout, quiet):
     for dataset in datasets:
         dataset_count += 1
         spatial_full_size = 0
-        spatial_simp_size = 0
-        spatial_simp_reduction = 0
-        if "gazetteer" in dataset:
-            if dataset["gazetteer"]["spatial_full"] is not None:
-                spatial_full_size = len(dataset["gazetteer"]["spatial_full"].encode('utf-8'))
+        spatial_extent_size = 0
+        spatial_extent_reduction = 0
+        if "spatial_extent" in dataset and len(dataset["spatial_extent"]) > 0:
+
+            spatial_extents = twdh.action.spatial_extents_show(id=dataset["id"])
+
+            breakpoint()
+            if "spatial_extent_full" in spatial_extents:
+                spatial_full_size = len(json.dumps(spatial_extents["spatial_extent_full"]))
                 spatial_full_total += spatial_full_size
             else:
                 spatial_full_size = 0
 
-            if dataset["gazetteer"]["spatial_simp"] is not None:
-                spatial_simp_size = len(dataset["gazetteer"]["spatial_simp"].encode('utf-8'))
-                spatial_simp_total += spatial_simp_size
+            if dataset["spatial_extent"] is not None:
+                spatial_extent_size = len(json.dumps(dataset["spatial_extent"]))
+                spatial_extent_total += spatial_extent_size
             else:
-                spatial_simp_size = 0
+                spatial_extent_size = 0
 
-            if dataset["gazetteer"]["spatial_full"] is not None or dataset["gazetteer"]["spatial_simp"] is not None:
+            if dataset["spatial_extent"] is not None:
                 spatial_dataset_count += 1
                 if spatial_full_size > 0:
-                  spatial_simp_reduction = '{}%'.format(round(( 100 - ( ( spatial_simp_size / spatial_full_size ) * 100 ) ), 2))
+                  spatial_extent_reduction = '{}%'.format(round(( 100 - ( ( spatial_extent_size / spatial_full_size ) * 100 ) ), 2))
                 else:
-                  spatial_simp_reduction = 'n/a'
-                logecho("{} / spatial_full: {} / spatial_simp: {} / reduction: {}".format(dataset["name"], spatial_full_size, spatial_simp_size, spatial_simp_reduction ), "info")
+                  spatial_extent_reduction = 'n/a'
+                logecho("{} / spatial_full: {} / spatial_extent: {} / reduction: {}".format(dataset["name"], spatial_full_size, spatial_extent_size, spatial_extent_reduction ), "info")
 
             else:
                 nonspatial_dataset_count += 1
-                spatial_simp_reduction = 0
+                spatial_extent_reduction = 0
 
         else:
             nonspatial_dataset_count += 1
 
     
-        csvdata.append( [dataset['id'], dataset['name'], spatial_full_size, spatial_simp_size, spatial_simp_reduction] )
+        csvdata.append( [dataset['id'], dataset['name'], spatial_full_size, spatial_extent_size, spatial_extent_reduction] )
 
     logecho( "", "divider" )
     logecho("{} spatial datasets".format(spatial_dataset_count), "info")
@@ -228,12 +261,12 @@ def spatial_stats(ctx, ids, csvout, quiet):
     csvdata.insert(1,["# {} nonspatial datasets".format(nonspatial_dataset_count)])
     logecho("spatial_full_total = {} bytes".format(spatial_full_total), "info")
     csvdata.insert(2,["# spatial_full_total = {} bytes".format(spatial_full_total)])
-    logecho("spatial_simp_total = {} bytes".format(spatial_simp_total), "info")
-    csvdata.insert(3,["# spatial_simp_total = {} bytes".format(spatial_simp_total)])
+    logecho("spatial_extent_total = {} bytes".format(spatial_extent_total), "info")
+    csvdata.insert(3,["# spatial_extent_total = {} bytes".format(spatial_extent_total)])
 
 
     if spatial_full_total > 0:
-        simplification_reduction = 100 - ( ( spatial_simp_total / spatial_full_total ) * 100 )
+        simplification_reduction = 100 - ( ( spatial_extent_total / spatial_full_total ) * 100 )
     else:
         simplification_reduction = 0
     logecho("simplification reduction = {}%".format( round( simplification_reduction, 2 ) ), "info")
