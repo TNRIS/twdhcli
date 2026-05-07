@@ -47,6 +47,8 @@ def get_patch_functions():
         'clear_data_dictionary': patch_fn_clear_data_dictionary,
         'set_title': patch_fn_set_title,
         'set_app_email': patch_fn_set_app_email,
+        'clear_extras': patch_fn_clear_extras,
+        'clear_gazetteer': patch_fn_clear_gazetteer,
         'clear_spatial_data': patch_fn_clear_spatial_data,
         'clear_spatial_data_full': patch_fn_clear_spatial_data_full,
         'set_spatial_data': patch_fn_set_spatial_data,
@@ -494,6 +496,53 @@ def patch_fn_fix_empty_date_ranges_and_collection_methods(ctx,dataset,data):
     return True
 
 
+def patch_fn_clear_extras(ctx,dataset,data):
+
+    remote = ctx.obj['twdh']
+    logecho = ctx.obj['logecho']
+    test_run = ctx.obj['test_run']
+
+    try:
+        if test_run:
+            return False
+
+        if "extras" in dataset:
+            remote.action.package_patch( id=dataset.get("id"), extras=[] )
+
+    except Exception as e:
+        if str(e) == 'Not found':
+            logecho( "Error: dataset {} not found".format(dataset.get("id")), 'error')
+            return False
+        else:
+            logecho("Error: {}".format(e), 'error')
+            return False
+
+    return True
+
+def patch_fn_clear_gazetteer(ctx,dataset,data):
+
+    remote = ctx.obj['twdh']
+    logecho = ctx.obj['logecho']
+    test_run = ctx.obj['test_run']
+
+    try:
+        if test_run:
+            return False
+
+        breakpoint()
+        if "gazetteer" in dataset:
+            remote.action.package_patch( id=dataset.get("id"), gazetteer=None )
+
+    except Exception as e:
+        if str(e) == 'Not found':
+            logecho( "Error: dataset {} not found".format(dataset.get("id")), 'error')
+            return False
+        else:
+            logecho("Error: {}".format(e), 'error')
+            return False
+
+    return True
+
 def patch_fn_clear_spatial_data(ctx,dataset,data):
 
     remote = ctx.obj['twdh']
@@ -545,7 +594,7 @@ def patch_fn_set_spatial_data(ctx,dataset,data):
     logecho = ctx.obj['logecho']
     test_run = ctx.obj['test_run']
 
-    breakpoint()
+    #breakpoint()
     spatial_extent = data.get('spatial_extent') or data.get('spatial_simp', '{}')
     spatial_full = data.get('spatial_full', '{}')
 
@@ -701,17 +750,30 @@ def migrate_spatial(ctx, patch_file, confirm_each, ids):
 
     for dataset in patch_data['results']:
 
-        logecho( "", "divider" )
 
         if len(dataset_filter) == 0 or dataset.get('id') in dataset_filter or dataset.get('name') in dataset_filter:
-            logecho( "Migrating {}".format( dataset['name'] ), 'info' )
 
             run_patch = True
 
-            if 'gazetteer' in dataset:
+            gztr_dict = next((d for d in dataset['extras'] if d['key'] == 'gazetteer' ), None)
 
-                old_spatial_full = dataset['gazetteer'].get('spatial_full', None)
-                old_spatial_simp = dataset['gazetteer'].get('spatial_simp', None)
+            #if 'gazetteer' in dataset['extras']:
+            if gztr_dict is not None:
+
+                try:
+                    gztr = json.loads( gztr_dict['value'] )
+                except json.JSONDecodeError:
+                    logecho("Error: Could not decode JSON '{}'".format(patch_data), 'error')
+                    sys.exit(1)
+                except Exception as e:
+                    logecho("An unexpected error occurred: {}".format(e), 'error')
+                    sys.exit(1)
+
+                logecho( "", "divider" )
+                logecho( "Migrating {}".format( dataset['name'] ), 'info' )
+
+                old_spatial_full = gztr.get('spatial_full', None)
+                old_spatial_simp = gztr.get('spatial_simp', None)
 
                 if old_spatial_full != None or old_spatial_simp != None:
                     
@@ -736,10 +798,11 @@ def migrate_spatial(ctx, patch_file, confirm_each, ids):
                 else:
                     logecho( "No spatial data found in gazetteer attribute for \"{}\"".format(dataset['name']), "info" )
             else:
+                #print( dataset['extras'] )
                 logecho( "No gazetteer attribute found", "info" )
 
-        else:
-            logecho( "Skipping because not found in filter: \"{}\"".format(dataset['name']), "info" )
+        #else:
+            #logecho( "Skipping because not found in filter: \"{}\"".format(dataset['name']), "info" )
 
 @twdhcli.command()
 @click.option('--patch-file',
