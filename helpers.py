@@ -223,7 +223,7 @@ def spatial_stats(ctx, ids, csvout, quiet):
 
             spatial_extents = twdh.action.spatial_extents_show(id=dataset["id"])
 
-            breakpoint()
+            #breakpoint()
             if "spatial_extent_full" in spatial_extents:
                 spatial_full_size = len(json.dumps(spatial_extents["spatial_extent_full"]))
                 spatial_full_total += spatial_full_size

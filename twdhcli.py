@@ -529,7 +529,7 @@ def patch_fn_clear_gazetteer(ctx,dataset,data):
         if test_run:
             return False
 
-        breakpoint()
+        #breakpoint()
         if "gazetteer" in dataset:
             remote.action.package_patch( id=dataset.get("id"), gazetteer=None )
 
