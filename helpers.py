@@ -29,8 +29,21 @@ def apikey_validates(ctx,apikey):
         #print(traceback.format_exc())
         sys.exit(1)
 
-
 def snapshot(ctx,dest):
+    """ Create json and jsonl snapshot files of 
+        - users
+        - organizations
+        - datasets
+            - data dictionaries
+            - resource views
+            - spatial extents
+        - applications
+        ... and run a 'spatial stats' report output to a CSV file
+
+    Args:
+        ctx (dict): context
+        dest (str): destination directory
+    """
 
     twdh = ctx.obj['twdh']
     logecho = ctx.obj['logecho']
@@ -50,15 +63,27 @@ def snapshot(ctx,dest):
         logecho('An error occurred: {}'.e, level='error')
         sys.exit(1)
 
-    ##########################################
-    # Create spatial stats report
-    ##########################################
-    spatial_stats( ctx, [], '{}/spatial-stats.csv'.format( snap_dest ), True )
+    snapshot_datasets( ctx, snap_dest )
+    snapshot_datasets_jsonl( ctx, snap_dest )
+    snapshot_data_dictionaries( ctx, snap_dest )
+    snapshot_resource_views( ctx, snap_dest )
+    snapshot_spatial( ctx, snap_dest )
+    spatial_stats( ctx, [], '{}/spatial-stats.csv'.format( snap_dest ) )
 
-    ##########################################
-    # Create human readable dataset and 
-    # application backups
-    ##########################################
+    logecho("Snapshot complete!", 'celebration')
+
+
+def snapshot_datasets(ctx,snap_dest):
+    """ Create human readable dataset and application backups
+
+    Args:
+        ctx (dict): context
+        span_dest (str): destination directory
+    """
+
+    twdh = ctx.obj['twdh']
+    logecho = ctx.obj['logecho']
+
     dataset_types = [ 'dataset', 'application' ]
 
     for dataset_type in dataset_types:
@@ -82,9 +107,18 @@ def snapshot(ctx,dest):
             logecho( "An unexpected error occurred, unable to write JSON: {}".format(e), 'error' )
             sys.exit(1)
 
-    ##########################################
-    # Create resource 'data dictionary' backup
-    ##########################################
+
+def snapshot_data_dictionaries(ctx,snap_dest):
+    """ Create resource 'data dictionary' backup
+
+    Args:
+        ctx (dict): context
+        span_dest (str): destination directory
+    """
+
+    twdh = ctx.obj['twdh']
+    logecho = ctx.obj['logecho']
+
     dd_file = '{}/data-dicts.jsonl'.format(snap_dest) 
     results = twdh.action.package_search(
         rows=100000,
@@ -112,10 +146,17 @@ def snapshot(ctx,dest):
         sys.exit(1)
 
 
+def snapshot_resource_views(ctx,snap_dest):
+    """ Create resource 'views' backup
 
-    ##########################################
-    # Create resource 'views' backup
-    ##########################################
+    Args:
+        ctx (dict): context
+        span_dest (str): destination directory
+    """
+
+    twdh = ctx.obj['twdh']
+    logecho = ctx.obj['logecho']
+
     v_file = '{}/resource-views.jsonl'.format(snap_dest) 
     results = twdh.action.package_search(
         rows=100000,
@@ -142,12 +183,20 @@ def snapshot(ctx,dest):
         logecho( "An unexpected error occurred: {}".format(e), 'error' )
         #sys.exit(1)
 
-    ##########################################
-    # Create JSONL backups of datasets, 
-    # applications, organizations, users. 
-    # Datasets include type 'dataset' and 
-    # 'application' all in the same file.
-    ##########################################
+
+def snapshot_datasets_jsonl(ctx,snap_dest):
+    """ Create JSONL backups of datasets,  applications, organizations, and 
+    users. Datasets include type 'dataset' and 'application' all in the same 
+    file.
+
+    Args:
+        ctx (dict): context
+        span_dest (str): destination directory
+    """
+
+    twdh = ctx.obj['twdh']
+    logecho = ctx.obj['logecho']
+
     obj_types = [ 
         'datasets', 
         'groups', 
@@ -194,11 +243,56 @@ def snapshot(ctx,dest):
 
 
         logecho("Successfully dumped datasets to {}".format(obj_file), 'info')
-    
-    logecho("Snapshot complete!", 'celebration')
+
+def snapshot_spatial(ctx,snap_dest):
+    """ Create backup of spatial data
+
+    Args:
+        ctx (dict): context
+        span_dest (str): destination directory
+    """
+
+    twdh = ctx.obj['twdh']
+    logecho = ctx.obj['logecho']
+
+    try:
+
+        dataset_file = f'{snap_dest}/spatial_data.jsonl' 
+        results = twdh.action.package_search(
+            rows=100000,
+            fq=f"type:dataset",
+            fl="id",
+            include_deleted=True,
+            include_drafts=True,
+            include_private=True
+        )
+
+        with open(dataset_file, 'w') as json_file:
+            for result in results["results"]:
+                logecho( result["id"], 'info' )
+                spatial_data = twdh.action.spatial_extents_show(
+                    id=result["id"],
+                    include_all=True
+                )
+                json_file.write(json.dumps(spatial_data) + '\n')
+        logecho( 'Created spatial data snapshot file: {}'.format(dataset_file), 'info' )
+
+    except FileNotFoundError:
+        logecho( "Unable to write JSON / Destination not found error", 'error' )
+        sys.exit(1)
+    except Exception as e:
+        logecho( "An unexpected error occurred, unable to write JSON: {}".format(e), 'error' )
+        sys.exit(1)
 
 
-def spatial_stats(ctx, ids, csvout, quiet):
+def spatial_stats(ctx, ids, csvout):
+    """ Create spatial stats report
+
+    Args:
+        ctx (dict): context
+        ids (str): space separated list of ids to include / all ids processed if left empty
+        csvout (str): output destination file
+    """
 
     twdh = ctx.obj['twdh']
     logecho = ctx.obj['logecho']
@@ -223,7 +317,6 @@ def spatial_stats(ctx, ids, csvout, quiet):
 
             spatial_extents = twdh.action.spatial_extents_show(id=dataset["id"])
 
-            #breakpoint()
             if "spatial_extent_full" in spatial_extents:
                 spatial_full_size = len(json.dumps(spatial_extents["spatial_extent_full"]))
                 spatial_full_total += spatial_full_size
@@ -327,20 +420,18 @@ def simplify_geojson_by_size(ctx, json_data, max_bytes, tolerance_step=0.0001):
     twdh = ctx.obj['twdh']
     logecho = ctx.obj['logecho']
 
-    try:
-        data = json.loads(json_data)
-    except (json.JSONDecodeError, AttributeError, IndexError, TypeError) as e:
-        log.error(f"Error processing json data: {e}")
-        return json_data
-
+    data = json_data
     tolerance = 0.0
-    current_size = len(json_data.encode('utf-8'))
+    current_size = len(json.dumps(json_data))
     orig_size = current_size
-    
+   
     while current_size > max_bytes and tolerance < 0.25: # Max 0.25 tolerance
+
         tolerance += tolerance_step
         new_features = []
+
         for feature in data['features']:
+            
             geom = shape(feature['geometry'])
             # Simplify geometry
             simplified_geom = geom.simplify(tolerance, preserve_topology=True)
@@ -353,7 +444,7 @@ def simplify_geojson_by_size(ctx, json_data, max_bytes, tolerance_step=0.0001):
         new_data = {'type': 'FeatureCollection', 'features': new_features}
         # Serialize with low precision to save bytes
         json_str = json.dumps(new_data, separators=(',', ':'))
-        current_size = len(json_str.encode('utf-8'))
+        current_size = len(json.dumps(json_str))
         
         #log.info( "-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-")
         if current_size <= max_bytes:
