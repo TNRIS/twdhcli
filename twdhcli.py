@@ -52,6 +52,8 @@ def get_patch_functions():
         'clear_spatial_data': patch_fn_clear_spatial_data,
         'clear_spatial_data_full': patch_fn_clear_spatial_data_full,
         'set_spatial_data': patch_fn_set_spatial_data,
+        'set_data_admin_approved': patch_fn_set_data_admin_approved,
+        'set_collection_method_description': patch_fn_set_collection_method_description,
         'fix_empty_date_ranges': patch_fn_fix_empty_date_ranges,
         'fix_empty_date_ranges_and_update_types': patch_fn_fix_empty_date_ranges_and_update_types,
         'fix_empty_date_ranges_and_collection_methods': patch_fn_fix_empty_date_ranges_and_collection_methods,
@@ -160,8 +162,11 @@ def twdhcli(ctx, host, apikey, test_run, quiet, debug, logfile):
 
     # log into CKAN
     try:
+        # Set up remote
         twdh = ckanapi.RemoteCKAN(host, apikey=apikey,
                             user_agent='twdhcli/' + version)
+        # Try to get status
+        twdh.action.status_show()
     except Exception as e:
         logecho('Cannot connect to host %s' % host, level='error')
         sys.exit()
@@ -626,6 +631,55 @@ def patch_fn_set_spatial_data(ctx,dataset,data):
 
     return True
 
+
+def patch_fn_set_data_admin_approved(ctx,dataset,data):
+
+    remote = ctx.obj['twdh']
+    logecho = ctx.obj['logecho']
+    test_run = ctx.obj['test_run']
+
+    try:
+        if test_run:
+            return False
+
+        remote.action.package_patch( id=dataset.get("id"), data_admin_approved=data['data_admin_approved'] )
+
+    except Exception as e:
+        if str(e) == 'Not found':
+            logecho( "Error: dataset {} not found".format(dataset.get("id")), 'error')
+            return False
+        else:
+            logecho("Error: {}".format(e), 'error')
+            return False
+
+    return True
+
+
+def patch_fn_set_collection_method_description(ctx,dataset,data):
+
+    remote = ctx.obj['twdh']
+    logecho = ctx.obj['logecho']
+    test_run = ctx.obj['test_run']
+
+    try:
+        if test_run:
+            return False
+
+        remote.action.package_patch( 
+            id=dataset.get("id"), 
+            collection_method_description=data['collection_method_description'] 
+        )
+
+    except Exception as e:
+        if str(e) == 'Not found':
+            logecho( "Error: dataset {} not found".format(dataset.get("id")), 'error')
+            return False
+        else:
+            logecho("Error: {}".format(e), 'error')
+            return False
+
+    return True
+
 def patch_fn_clear_data_dictionary(ctx,dataset,data):
 
     remote = ctx.obj['twdh']
@@ -944,38 +998,62 @@ def update_spatial_simp(ctx, new_size, ids, confirm_each, allow_enlarge, skip_sn
                 return
 
     for dataset in datasets:
-        spatial_full = dataset.get("spatial_full")
-        spatial_extent = dataset.get("spatial_extent")
+
+        try:
+            spatial_extents = twdh.action.spatial_extents_show(id=dataset.get("id"))
+
+        except Exception as e:
+            logecho( e )
+            sys.exit()
+
+        spatial_full = spatial_extents.get("spatial_extent_full", None)
+        spatial_extent = dataset.get("spatial_extent", None)
 
         if spatial_full:
-            if not allow_enlarge and spatial_extent and len(spatial_extent.encode('utf-8')) < new_size:
-                logecho( "+ {} ({}) spatial_simp = {} already less than {}".format(dataset.get("title"),dataset.get("id"),len(spatial_extent.encode('utf-8')),new_size), 'info')
+
+            if not allow_enlarge and spatial_extent and len(json.dumps(spatial_extent)) < new_size:
+
+                logecho( "+ {} ({}) spatial_simp = {} already less than {}".format(
+                    dataset.get("title"),
+                    dataset.get("id"),
+                    len(spatial_extent),
+                    new_size
+                ), 'info')
+
             else:
 
                 logecho( "About to patch {} ({})".format(dataset.get("title"),dataset.get("id")), 'info')
+
                 if confirm_each:
+
                     if click.confirm('🟢 Proceed with update?'):
                         logecho( "Proceeding with update ...", "info" )
                     else: 
                         logecho( "Update cancelled", "warning" )
                         continue
-                try:
-                    if len(spatial_full.encode('utf-8')) < new_size:
-                        new_spatial_extent = spatial_full
-                    else:
-                        new_spatial_extent = h.simplify_geojson_by_size(spatial_full, new_size)
 
-                    if patch_fn_set_spatial_data(ctx,dataset,{
-                                                    "spatial_extent": new_spatial_extent,
-                                                    "spatial_full": spatial_full
-                                                }):
+                try:
+
+                    if len(json.dumps(spatial_full)) < new_size:
+                        new_spatial_extent = json.dumps(spatial_full)
+                    else:
+                        new_spatial_extent = h.simplify_geojson_by_size(ctx,spatial_full, new_size)
+                    #breakpoint()
+                    if patch_fn_set_spatial_data(
+                                ctx,
+                                dataset,
+                                {
+                                    "spatial_extent": new_spatial_extent,
+                                    "spatial_full": json.dumps(spatial_full)
+                                }
+                            ):
                         logecho( "Updated spatial_simp on dataset \"{}\"".format(dataset['name']), "info" )
                     else:
                         logecho( "Error updating spatial_simp on dataset \"{}\"".format(dataset['name']), "info" )
-                    
 
                 except Exception as e:
                     logecho( e )
+                    sys.exit()
 
 @twdhcli.command()
 @click.option('--ids',
@@ -1051,6 +1129,7 @@ def get_unapproved_public_active_datasets(ctx):
 
     twdh = ctx.obj['twdh']
     logecho = ctx.obj['logecho']
+    count = 0
 
     results = twdh.action.package_search(
         fq_list=[
@@ -1060,11 +1139,28 @@ def get_unapproved_public_active_datasets(ctx):
         ],
         rows=10000
     )
+    count = results['count']
     if results['count'] > 0:
         for result in results['results']:
             logecho(result['id'], 'info')
+        logecho( "{results['count']} unapproved, public, active datasets found.", "info" )
     else:
-        logecho( 'No unapproved, public, active datasets found. That\'s a good thing!', 'info' )
+        logecho( "No unapproved, public, active datasets found. That's a good thing!", "info" )
+
+    results = twdh.action.package_search(
+        fq_list=[
+            '-data_admin_approved:[* TO *]',
+        ],
+        rows=10000
+    )
+    count = results['count']
+    if results['count'] > 0:
+        for result in results['results']:
+            logecho(result['id'], 'info')
+        logecho( f"{results['count']} datasets found missing `data_admin_approved` field.", "error" )
+    else:
+        logecho( "No public, active datasets missing a `data_admin_approved` attribute found. That's a good thing!", "info" )
+
 
 @twdhcli.command()
 @click.pass_context
@@ -1161,17 +1257,13 @@ def list_applications(ctx,ids):
               default='./spatial-stats.csv',
               show_default=True,
               help='The full path of the CSV output file.')
-@click.option('--quiet',
-              default=False,
-              is_flag=True,
-              help='Don\t write per-dataset details to stdout')
 @click.pass_context
-def spatial_stats(ctx,ids,csvout,quiet):
+def spatial_stats(ctx,ids,csvout):
     """
     Get spatial stats of datasets and export them to a CSV
     """
 
-    h.spatial_stats( ctx, ids, csvout, quiet )
+    h.spatial_stats( ctx, ids, csvout )
 
 
 if __name__ == '__main__':
