@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 from shapely import from_geojson, to_geojson
 from shapely.geometry import shape, mapping, MultiPolygon, Polygon
 from shapely.ops import unary_union
-
+from shapely.validation import make_valid
 
 def apikey_validates(ctx,apikey):
 
@@ -207,15 +207,6 @@ def snapshot_datasets_jsonl(ctx,snap_dest):
         obj_file = '{}/{}.jsonl'.format(snap_dest, obj_type)
         try:
 
-            """
-            command = "ckanapi dump {obj_type} --apikey={apikey} --all -O {obj_file} -r {url}".format( \
-                obj_type=obj_type, \
-                apikey=twdh.apikey, \
-                obj_file=obj_file, \
-                url=twdh.address \
-            )
-            """
-
             command = [
                 "ckanapi",
                 "dump", "{obj_type}".format(obj_type=obj_type),
@@ -226,16 +217,10 @@ def snapshot_datasets_jsonl(ctx,snap_dest):
             ]
 
 
-            #breakpoint()
-            #logecho( command, 'info' )
             logecho( 'Dumping {}...\n'.format(obj_type), 'info' )
             subprocess.check_call(command)
             logecho( 'Created snapshot file: {}'.format(obj_file), 'info' )
 
-
-        #except FileNotFoundError:
-            #logecho( "Unable to write JSONL / Destination not found error", 'error' )
-            #sys.exit(1)
         except Exception as e:
             logecho( "An error occurred: {}".format(e), 'error' )
             print(traceback.format_exc())
@@ -415,42 +400,36 @@ def fetch_datasets(ctx,ids=None,package_type='dataset'):
     return datasets
 
 
-def simplify_geojson_by_size(ctx, json_data, max_bytes, tolerance_step=0.0001):
+def simplify_geojson_by_size(ctx, json_data, max_bytes, tolerance_step=0.001):
 
     twdh = ctx.obj['twdh']
     logecho = ctx.obj['logecho']
 
     data = json_data
-    tolerance = 0.0
+    tolerance = 0.001
     current_size = len(json.dumps(json_data))
     orig_size = current_size
-   
-    while current_size > max_bytes and tolerance < 0.25: # Max 0.25 tolerance
 
+    # retrieve polygons from geojson
+    polygons = [make_valid(shape(feature['geometry'])) for feature in data['features']]
+
+    # union polygons and create initial simplification
+    merged = unary_union(polygons)
+    #simplified = merged.simplify(tolerance, preserve_topology=True)
+    current_size = len(to_geojson(merged))
+
+    # repeat simplification with increasing tolerance until size is less than max_bytes
+    while current_size > max_bytes and tolerance < 0.5:
         tolerance += tolerance_step
-        new_features = []
-
-        for feature in data['features']:
-            
-            geom = shape(feature['geometry'])
-            # Simplify geometry
-            simplified_geom = geom.simplify(tolerance, preserve_topology=True)
-            
-            # Update feature
-            new_feature = feature.copy()
-            new_feature['geometry'] = mapping(simplified_geom)
-            new_features.append(new_feature)
-            
-        new_data = {'type': 'FeatureCollection', 'features': new_features}
-        # Serialize with low precision to save bytes
-        json_str = json.dumps(new_data, separators=(',', ':'))
-        current_size = len(json.dumps(json_str))
+        simplified = merged.simplify(tolerance, preserve_topology=True)
+        current_size = len(to_geojson(simplified))
         
-        #log.info( "-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=+=-")
-        if current_size <= max_bytes:
-            reduction = 100 - (( current_size / orig_size ) * 100)
-            logecho(f"Original Size: {orig_size} bytes / Final size: {current_size} bytes / Reduction: {round(reduction, 2)}% / Tolerance: {round(tolerance, 4)}", 'info')
-            return json_str
+    if current_size <= max_bytes:
+        reduction = 100 - (( current_size / orig_size ) * 100)
+        logecho(f"Original Size: {orig_size} bytes / Final size: {current_size} bytes / Reduction: {round(reduction, 2)}% / Tolerance: {round(tolerance, 4)}", 'info')
+        return to_geojson(simplified)
+    else:
+        logecho("Could not reach target size without losing too much detail. Current size={}".format(current_size), 'info')
+        #return json.dumps(json_data)
+        return to_geojson(merged)
 
-    logecho("Could not reach target size without losing too much detail. Current size={}".format(current_size), 'info')
-    return json_data

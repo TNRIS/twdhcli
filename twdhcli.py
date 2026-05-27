@@ -18,14 +18,13 @@ import subprocess
 
 import helpers as h
 
-version = '0.11.0'
+version = '0.12.0'
 
-# Initialize Colorama with autoreset enabled
+# Initialize Colorama
 init(autoreset=True)
 
 log = logging.getLogger(__name__)
 FORMAT = '%(message)s'
-#logging.basicConfig(format=FORMAT, level=logging.INFO)
 
 formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
 
@@ -59,7 +58,6 @@ def get_patch_functions():
         'fix_empty_date_ranges_and_collection_methods': patch_fn_fix_empty_date_ranges_and_collection_methods,
         'validate_datasets': patch_fn_validate_datasets,
         'fix_place_keywords': patch_fn_fix_place_keywords,
-
     }
 
 @click.group()
@@ -337,7 +335,8 @@ def patch_fn_example(ctx,dataset,data):
         if test_run:
             return False
 
-        # Call action here
+        # Make API action call here, for example ...
+        # remote.action.status_show()
 
     except Exception as e:
         if str(e) == 'Not found':
@@ -380,18 +379,6 @@ def patch_fn_fix_place_keywords(ctx,dataset,data):
                     logecho("Error: {}".format(e), 'error')
                     return False
             
-            """
-            if dataset.get('place_keywords'):
-                logecho( "place_keywords={}".format( dataset.get("place_keywords") ) )
-            else:
-                logecho( "No root place_keywords" )
-            gazetteer = dataset.get('gazetteer','')
-            if gazetteer.get('place_keywords'):
-                logecho( "gazetteer={}".format( gazetteer.get('place_keywords') ) )
-            else:
-                logecho( "No gazetteer place_keywords" )
-            """
-                
             found = True
 
     return True
@@ -764,7 +751,7 @@ def patch_fn_set_app_email(ctx,dataset,data):
 @click.pass_context
 def migrate_spatial(ctx, patch_file, confirm_each, ids):
     """
-    RestoreMigrate spatial data to remove old GZTR model and use new model with dedicated table for `spatial_full` and move `gazettteer.spatial_simp` to `spatial_extent`
+    Migrate spatial data to remove old GZTR model and use new model with dedicated table for `spatial_full` and move `gazettteer.spatial_simp` to `spatial_extent`
     """
 
     twdh = ctx.obj['twdh']
@@ -804,14 +791,12 @@ def migrate_spatial(ctx, patch_file, confirm_each, ids):
 
     for dataset in patch_data['results']:
 
-
         if len(dataset_filter) == 0 or dataset.get('id') in dataset_filter or dataset.get('name') in dataset_filter:
 
             run_patch = True
 
             gztr_dict = next((d for d in dataset['extras'] if d['key'] == 'gazetteer' ), None)
 
-            #if 'gazetteer' in dataset['extras']:
             if gztr_dict is not None:
 
                 try:
@@ -855,9 +840,6 @@ def migrate_spatial(ctx, patch_file, confirm_each, ids):
                 #print( dataset['extras'] )
                 logecho( "No gazetteer attribute found", "info" )
 
-        #else:
-            #logecho( "Skipping because not found in filter: \"{}\"".format(dataset['name']), "info" )
-
 @twdhcli.command()
 @click.option('--patch-file',
               required=True,
@@ -871,24 +853,21 @@ def migrate_spatial(ctx, patch_file, confirm_each, ids):
 def restore_spatial(ctx, patch_file, confirm_each):
     """
     Restore spatial data to datasets
+
+    Args:
+        ctx (dict): context
+        patch_file (str): JSON file containing spatial data to be restored
+        confirm_each (bool): prompt before patching each dataset
+
     """
+
+
+    logecho( "ERROR: This function needs to be updated to work with the spatial_data.jsonl snapshot files", "info" )
+    sys.exit(1)
 
     twdh = ctx.obj['twdh']
     logecho = ctx.obj['logecho']
 
-    try:
-        with open(patch_file, "r") as file:
-            patch_data = json.load(file)
-    except FileNotFoundError:
-        logecho("Error: The file was not found.", 'error')
-        sys.exit(1)
-    except json.JSONDecodeError as e:
-        logecho(f"Error: Could not decode JSON from '{patch_file}'. Check if the file contains valid JSON.", 'error')
-        logecho( f"{e}", 'error' )
-        sys.exit(1)
-    except Exception as e:
-        logecho(f"An unexpected error occurred: {e}", 'error')
-        sys.exit(1)
     logecho( "Restoring spatial data from {} ...".format(patch_file), "info" )
 
     if not confirm_each:
@@ -902,18 +881,35 @@ def restore_spatial(ctx, patch_file, confirm_each):
     else:
         confirm_all = True
 
+    with open(patch_file) as file:
+        for line in file:
+
+            logecho( "", "divider" )
+            run_patch = True
+
+            data = json.loads(line)
+
+            spatial_extent = data.get('spatial_extent',None)
+            spatial_extent_full = data.get('spatial_extent_full',None)
+
+            print( data['id'] )
+            print( spatial_extent )
+            print( spatial_extent_full )
+
+    sys.exit(1)
+
+
     for dataset in patch_data['results']:
 
         logecho( "", "divider" )
-
         run_patch = True
 
         spatial_full = None
         spatial_extent = None
         if not spatial_extent:
-            spatial_extent = dataset.get('spatial_extent')
+            spatial_extent = dataset.get('spatial_extent',None)
         if not spatial_full:
-            spatial_full = dataset.get('spatial_full')   
+            spatial_full = dataset.get('spatial_full',None)   
 
         if spatial_full != None or spatial_extent != None:
 
