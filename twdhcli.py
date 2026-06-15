@@ -521,7 +521,6 @@ def patch_fn_clear_gazetteer(ctx,dataset,data):
         if test_run:
             return False
 
-        #breakpoint()
         if "gazetteer" in dataset:
             remote.action.package_patch( id=dataset.get("id"), gazetteer=None )
 
@@ -586,7 +585,6 @@ def patch_fn_set_spatial_data(ctx,dataset,data):
     logecho = ctx.obj['logecho']
     test_run = ctx.obj['test_run']
 
-    #breakpoint()
     spatial_extent = data.get('spatial_extent') or data.get('spatial_simp', '{}')
     spatial_full = data.get('spatial_full', '{}')
 
@@ -998,6 +996,7 @@ def update_spatial_simp(ctx, new_size, ids, confirm_each, allow_enlarge, skip_sn
         try:
             spatial_extents = twdh.action.spatial_extents_show(id=dataset.get("id"))
 
+
         except Exception as e:
             logecho( e )
             sys.exit()
@@ -1034,7 +1033,6 @@ def update_spatial_simp(ctx, new_size, ids, confirm_each, allow_enlarge, skip_sn
                         new_spatial_extent = json.dumps(spatial_full)
                     else:
                         new_spatial_extent = h.simplify_geojson_by_size(ctx,spatial_full, new_size)
-                    #breakpoint()
                     if patch_fn_set_spatial_data(
                                 ctx,
                                 dataset,
