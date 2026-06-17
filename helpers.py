@@ -5,15 +5,20 @@ import json
 import subprocess
 import traceback
 
-from datetime import datetime, date
+from datetime import datetime
 
 from pathlib import Path
 from urllib.parse import urlparse
 
-from shapely import from_geojson, to_geojson
-from shapely.geometry import shape, mapping, MultiPolygon, Polygon
+from shapely import to_geojson
+from shapely.geometry import shape
 from shapely.ops import unary_union
 from shapely.validation import make_valid
+
+PROD_HOSTS = {
+    "txwaterdatahub.org",
+    "www.txwaterdatahub.org",
+}
 
 def apikey_validates(ctx,apikey):
 
@@ -71,6 +76,7 @@ def snapshot(ctx,dest):
     spatial_stats( ctx, [], '{}/spatial-stats.csv'.format( snap_dest ) )
 
     logecho("Snapshot complete!", 'celebration')
+    logecho("Snapshot directory: {}".format(snap_dest), 'info')
 
 
 def snapshot_datasets(ctx,snap_dest):
@@ -134,7 +140,15 @@ def snapshot_data_dictionaries(ctx,snap_dest):
                     for resource in dataset['resources']:
                         dd = twdh.action.data_dictionary_show( id=resource['id'] )
                         if len(dd) > 0:
-                            json_file.write(json.dumps(dd) + '\n')
+                            record = {
+                                "package_id": dataset.get("id"),
+                                "package_name": dataset.get("name"),
+                                "resource_id": resource.get("id"),
+                                "resource_name": resource.get("name"),
+                                "data_dictionary": dd,
+                            }
+
+                            json_file.write(json.dumps(record) + '\n')
 
         logecho( 'Created snapshot file: {}'.format(dd_file), 'info' )
 
@@ -172,7 +186,15 @@ def snapshot_resource_views(ctx,snap_dest):
                     for resource in dataset['resources']:
                         views = twdh.action.resource_view_list( id=resource['id'] )
                         if len(views) > 0:
-                            json_file.write(json.dumps(views) + '\n')
+                            record = {
+                                "package_id": dataset.get("id"),
+                                "package_name": dataset.get("name"),
+                                "package_type": dataset.get("type"),
+                                "resource_id": resource.get("id"),
+                                "resource_name": resource.get("name"),
+                                "views": views,
+                            }
+                            json_file.write(json.dumps(record) + '\n')
 
         logecho( 'Created snapshot file: {}'.format(v_file), 'info' )
 
@@ -206,6 +228,70 @@ def snapshot_datasets_jsonl(ctx,snap_dest):
     for obj_type in obj_types:
         obj_file = '{}/{}.jsonl'.format(snap_dest, obj_type)
         try:
+            if obj_type == "organizations":
+                logecho('Dumping organizations with ckanapi dump...\n', 'info')
+
+                command = [
+                    "ckanapi",
+                    "dump", "organizations",
+                    "--apikey={apikey}".format(apikey=twdh.apikey),
+                    "--all",
+                    "-O", "{obj_file}".format(obj_file=obj_file),
+                    "-r", "{url}".format(url=twdh.address)
+                ]
+
+                subprocess.check_call(command)
+
+                logecho(
+                    "Appending dumped organizations with users...\n",
+                    "info",
+                )
+
+                enriched_orgs = []
+
+                with open(obj_file, "r") as json_file:
+                    for line in json_file:
+                        if not line.strip():
+                            continue
+
+                        org = json.loads(line)
+                        org_id = org.get("id") or org.get("name")
+
+                        if not org_id:
+                            continue
+
+                        try:
+                            full_org = twdh.action.organization_show(
+                                id=org_id,
+                                include_users=True,
+                                include_datasets=False,
+                            )
+
+                            enriched_orgs.append(full_org)
+
+                        except Exception as e:
+                            logecho(
+                                "Could not enrich organization {} with users, keeping dumped org. Error: {}".format(
+                                    org_id,
+                                    e,
+                                ),
+                                "warning",
+                            )
+                            enriched_orgs.append(org)
+
+                with open(obj_file, "w") as json_file:
+                    for org in enriched_orgs:
+                        json_file.write(json.dumps(org) + "\n")
+
+                logecho('Created snapshot file: {}'.format(obj_file), 'info')
+                logecho(
+                    "Successfully dumped and enriched {} organizations to {}".format(
+                        len(enriched_orgs),
+                        obj_file,
+                    ),
+                    'info',
+                )
+                continue
 
             command = [
                 "ckanapi",
@@ -227,7 +313,7 @@ def snapshot_datasets_jsonl(ctx,snap_dest):
             sys.exit(1)
 
 
-        logecho("Successfully dumped datasets to {}".format(obj_file), 'info')
+        logecho("Successfully dumped {} to {}".format(obj_type, obj_file), 'info')
 
 def snapshot_spatial(ctx,snap_dest):
     """ Create backup of spatial data
@@ -259,7 +345,13 @@ def snapshot_spatial(ctx,snap_dest):
                     id=result["id"],
                     include_all=True
                 )
-                json_file.write(json.dumps(spatial_data) + '\n')
+                record = {
+                        "package_id": result.get("id"),
+                        "package_name": result.get("name"),
+                        "spatial_data": spatial_data,
+                    }
+
+                json_file.write(json.dumps(record) + '\n')
         logecho( 'Created spatial data snapshot file: {}'.format(dataset_file), 'info' )
 
     except FileNotFoundError:
@@ -433,3 +525,54 @@ def simplify_geojson_by_size(ctx, json_data, max_bytes, tolerance_step=0.001):
         #return json.dumps(json_data)
         return to_geojson(merged)
 
+
+def assert_not_prod_destination(dest_host):
+    parsed = urlparse(dest_host)
+    hostname = (parsed.hostname or "").lower()
+
+    if hostname in PROD_HOSTS:
+        raise RuntimeError(
+            f"Refusing to continue. PROD cannot be used as clone destination: {hostname}"
+        )
+
+    if "prod" in hostname and "dev" not in hostname and "localhost" not in hostname:
+        raise RuntimeError(
+            f"Refusing to continue. Destination looks like production: {hostname}"
+        )
+
+def validate_snapshot_dir(snapshot_dir):
+    snapshot_path = Path(snapshot_dir)
+
+    if not snapshot_path.exists():
+        raise RuntimeError(f"Snapshot directory does not exist: {snapshot_dir}")
+
+    if not snapshot_path.is_dir():
+        raise RuntimeError(f"Snapshot path is not a directory: {snapshot_dir}")
+
+    required_files = [
+        "datasets.json",
+        "applications.json",
+        "datasets.jsonl",
+        "groups.jsonl",
+        "organizations.jsonl",
+        "users.jsonl",
+        "data-dicts.jsonl",
+        # "resource-views.jsonl",
+        "spatial_data.jsonl",
+    ]
+
+    missing_files = []
+
+    for filename in required_files:
+        filepath = snapshot_path / filename
+        if not filepath.exists():
+            missing_files.append(filename)
+
+    if missing_files:
+        raise RuntimeError(
+            "Snapshot directory is missing required files: {}".format(
+                ", ".join(missing_files)
+            )
+        )
+
+    return snapshot_path
