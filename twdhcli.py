@@ -1367,5 +1367,82 @@ def clone(ctx, dest_host, snapshot_dir):
     )
     logecho("Clone completed without wiping destination data.", "celebration")
 
+@twdhcli.command("migrate-secondary-tags")
+@click.option('--ids',
+              required=False,
+              default=None,
+              help='Space-separated dataset ids or names to migrate')
+@click.pass_context
+def migrate_secondary_tags(ctx, ids):
+    """
+    Move secondary_tags into primary_tags and sync tag_string.
+    """
+    twdh = ctx.obj['twdh']
+    logecho = ctx.obj['logecho']
+    test_run = ctx.obj['test_run']
+
+    datasets = h.fetch_datasets(ctx, ids, "dataset")
+
+    logecho("Found {} datasets to check.".format(len(datasets)), "info")
+
+    migrated = 0
+    skipped = 0
+    failed = 0
+
+    for dataset in datasets:
+        try:
+            dataset = twdh.action.package_show(id=dataset.get("id"))
+
+            name = dataset.get("name")
+            title = dataset.get("title") or name
+
+            primary_tags = dataset.get("primary_tags") or []
+            secondary_tags = dataset.get("secondary_tags") or []
+
+            if not secondary_tags:
+                skipped += 1
+                logecho("Skipping {}: no secondary_tags".format(name), "info")
+                continue
+
+            merged_tags = []
+
+            for tag in primary_tags + secondary_tags:
+                if tag not in merged_tags:
+                    merged_tags.append(tag)
+
+            logecho("", "divider")
+            logecho("Dataset: {} ({})".format(title, name), "info")
+            logecho("primary_tags before: {}".format(primary_tags), "info")
+            logecho("secondary_tags before: {}".format(secondary_tags), "info")
+            logecho("primary_tags after: {}".format(merged_tags), "info")
+            logecho("tag_string after: {}".format(", ".join(merged_tags)), "info")
+
+            
+
+            if test_run:
+                skipped += 1
+                logecho("test-run enabled, not patching {}".format(name), "warning")
+                continue
+
+            twdh.action.package_patch(
+                id=dataset.get("id"),
+                primary_tags=merged_tags,
+                tag_string=", ".join(merged_tags),
+                secondary_tags=[]
+            )
+
+            migrated += 1
+            logecho("Migrated {}".format(name), "celebration")
+
+        except Exception as e:
+            failed += 1
+            logecho("Failed to migrate {}: {}".format(dataset.get("name"), e), "error")
+
+    logecho("", "divider")
+    logecho(
+        "Done. migrated={}, skipped={}, failed={}".format(migrated, skipped, failed),
+        "celebration" if failed == 0 else "warning"
+    )
+
 if __name__ == '__main__':
     twdhcli(obj={},auto_envvar_prefix='TWDHCLI')
