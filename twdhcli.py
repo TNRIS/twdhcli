@@ -1399,9 +1399,19 @@ def migrate_secondary_tags(ctx, ids):
             primary_tags = dataset.get("primary_tags") or []
             secondary_tags = dataset.get("secondary_tags") or []
 
-            if not secondary_tags:
+            if isinstance(primary_tags, str):
+                primary_tags_list = []
+
+                for tag in primary_tags.split(","):
+                    tag = tag.strip()  
+                    if tag:            
+                        primary_tags_list.append(tag)
+
+                primary_tags = primary_tags_list
+
+            if not primary_tags and not secondary_tags:
                 skipped += 1
-                logecho("Skipping {}: no secondary_tags".format(name), "info")
+                logecho("Skipping {}: no primary_tags or secondary_tags".format(name), "info")
                 continue
 
             merged_tags = []
@@ -1414,11 +1424,9 @@ def migrate_secondary_tags(ctx, ids):
             logecho("Dataset: {} ({})".format(title, name), "info")
             logecho("primary_tags before: {}".format(primary_tags), "info")
             logecho("secondary_tags before: {}".format(secondary_tags), "info")
-            logecho("primary_tags after: {}".format(merged_tags), "info")
             logecho("tag_string after: {}".format(", ".join(merged_tags)), "info")
 
-            
-
+        
             if test_run:
                 skipped += 1
                 logecho("test-run enabled, not patching {}".format(name), "warning")
@@ -1426,7 +1434,7 @@ def migrate_secondary_tags(ctx, ids):
 
             twdh.action.package_patch(
                 id=dataset.get("id"),
-                primary_tags=merged_tags,
+                primary_tags=[],
                 tag_string=", ".join(merged_tags),
                 secondary_tags=[]
             )
