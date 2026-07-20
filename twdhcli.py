@@ -13,6 +13,7 @@ import csv
 from pathlib import Path
 from urllib.parse import urlparse
 import subprocess
+import traceback
 
 import helpers as h
 import helpers_clone as ch
@@ -191,6 +192,33 @@ def snapshot(ctx,dest):
     Create JSON snapshot files for datasets, applications and organizations
     """
     h.snapshot(ctx,dest)
+
+@twdhcli.command()
+@click.option('--dest',
+              type=click.Path(),
+              default='./twdh-dpp-reports',
+              show_default=True,
+              help='The full path of the CSV output file.')
+@click.pass_context
+def dpp_report(ctx,dest):
+    """
+    Create Datepusher Plus status report
+    """
+    h.dpp_report(ctx,dest)
+
+
+@twdhcli.command()
+@click.option('--dest',
+              type=click.Path(),
+              default='./twdh-tag-reports',
+              show_default=True,
+              help='The full path of the CSV output file.')
+@click.pass_context
+def tag_report(ctx,dest):
+    """
+    Create Tag report
+    """
+    h.tag_report(ctx,dest)
 
 
 @twdhcli.command()
