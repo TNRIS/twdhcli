@@ -9,14 +9,21 @@ CANONICAL_CLONE_USERS = {
 }
 
 S3_FILESTORE_BUCKET_URL = "https://twdh-s3filestore.s3.us-east-1.amazonaws.com"
-SOURCE_FILESTORE_PREFIX = "dev"
-DEST_FILESTORE_PREFIX = "docker-twdh-local"
-PII_EMAIL_VALUE = "dipak.shetty@twdb.texas.gov"
+
+SOURCE_FILESTORE_PREFIX = "prod"
+DEST_FILESTORE_PREFIX = "dev"
+
+PII_EMAIL_VALUE = "ben.bright@twdb.texas.gov"
 
 PII_PACKAGE_EMAIL_FIELDS = {
     "author_email",
     # "maintainer_email",
     "data_contact_email",
+}
+
+DEFAULT_VALUES = {
+    "next_update": "2099-12-31",
+    "data_admin_approved": "approved"
 }
 
 def replace_package_email_fields(cleaned):
@@ -34,10 +41,10 @@ def apply_dummy_defaults(cleaned):
     """
 
     if not cleaned.get("next_update"):
-        cleaned["next_update"] = "2099-12-31"
+        cleaned["next_update"] = DEFAULT_VALUES.get("next_update", "2099-12-31")
 
     if not cleaned.get("data_admin_approved"):
-        cleaned["data_admin_approved"] = "approved"
+        cleaned["data_admin_approved"] = DEFAULT_VALUES.get("data_admin_approved", "approved")
 
     return cleaned
 
