@@ -15,6 +15,8 @@ from shapely.geometry import shape
 from shapely.ops import unary_union
 from shapely.validation import make_valid
 
+from ckanapi.errors import NotFound
+
 PROD_HOSTS = {
     "txwaterdatahub.org",
     "www.txwaterdatahub.org",
@@ -53,6 +55,7 @@ def snapshot(ctx,dest):
     twdh = ctx.obj['twdh']
     logecho = ctx.obj['logecho']
 
+    """
     if not os.path.exists(dest):
         logecho('Destination directory {} not found'.format(dest), level='error')
         sys.exit()
@@ -67,6 +70,9 @@ def snapshot(ctx,dest):
     except Exception as e:
         logecho('An error occurred: {}'.e, level='error')
         sys.exit(1)
+    """
+
+    snap_dest = mk_report_dir(ctx,dest)
 
     snapshot_datasets( ctx, snap_dest )
     snapshot_datasets_jsonl( ctx, snap_dest )
@@ -469,7 +475,6 @@ def fetch_datasets(ctx,ids=None,package_type='dataset'):
       id_list = ids.split()
       for id in id_list:
           try:
-
               dataset = twdh.action.package_show( id=id )
               if dataset:
                   datasets.append( dataset )
@@ -576,3 +581,319 @@ def validate_snapshot_dir(snapshot_dir):
         )
 
     return snapshot_path
+
+
+def dpp_report(ctx,dest):
+    """
+    Get datapusher status for all DP+ resources
+    """
+
+    twdh = ctx.obj['twdh']
+    logecho = ctx.obj['logecho']
+    host = ctx.obj['host']
+
+    logecho( "Running Datapusher Plus status report")
+    report_dest = mk_report_dir(ctx,dest)
+
+    res_count = 0
+    results = []
+    errors = []
+    error_urls = []
+    error_messages = []
+    error_detail = []
+    error_summary = {
+        'SolrHttp404': { 'count': 0, 'ids': [] },
+        'SolrHttp500': { 'count': 0, 'ids': [] },
+        'SolrHttp510': { 'count': 0, 'ids': [] },
+        'SolrTimeoutError': { 'count': 0, 'ids': [] },
+        'OtherSolrError': { 'count': 0, 'ids': [] },
+        'InvalidCSV': { 'count': 0, 'ids': [] },
+        'InvalidChunkLength': { 'count': 0, 'ids': [] },
+        'InvalidOLESignature': { 'count': 0, 'ids': [] },
+        'ReadTimedOut': { 'count': 0, 'ids': [] },
+        'MaxRetriesExceeded': { 'count': 0, 'ids': [] },
+        'UnsupportedFileFormat': { 'count': 0, 'ids': [] },
+        'StatusCode403': { 'count': 0, 'ids': [] },
+        'StatusCode404': { 'count': 0, 'ids': [] },
+        'StatusCode504': { 'count': 0, 'ids': [] },
+        'QSVValidationFailure': { 'count': 0, 'ids': [] },
+        'NoTaskStatus': { 'count': 0, 'ids': [] },
+        'Null': { 'count': 0, 'ids': [] },
+        'Other': { 'count': 0, 'ids': [] }
+    }
+    error_summary_other = []
+
+    datasets = fetch_datasets(ctx,None,'dataset')
+    for dataset in datasets:
+        for resource in dataset.get( 'resources', []):
+            logecho( "{}({}) {}({}) {}".format( dataset.get('name'),dataset.get('id'),resource.get('name'),resource.get('id'), str(resource.get('datastore_active'))) )
+            result = {
+                'dataset': dataset.get('name'),
+                'dataset_id': dataset.get('id'),
+                'resource': resource.get('name'),
+                'resource_id': resource.get('id'),
+                'resource_format': resource.get('format', 'N/A'),
+                'datastore_active': resource.get('datastore_active', 'N/A')
+            }
+            res_count+=1
+            try:
+                dp_status = twdh.action.datapusher_status( resource_id=resource.get('id') )
+                if dp_status:
+
+                    if "task_info" in dp_status:
+
+                        task_info = dp_status.get("task_info")
+
+                        if not 'status' in task_info:
+                            error_summary['NoTaskStatus']['count'] += 1
+                            error_summary['NoTaskStatus']['ids'].append(dataset.get('name'))
+                        else:
+                            # Remove logs if task status is complete
+                            if( task_info["status"] == "complete"):
+                                dp_status["task_info"].pop('logs')
+                            else:
+                                error_urls.append(task_info["metadata"].get("original_url", ""))
+                                error_messages.append(task_info.get("error", ""))
+                                url = task_info["metadata"].get("original_url", "")
+                                parsed = urlparse(url)
+                                error_detail.append(
+                                    {
+                                        'last_updated': dp_status.get('last_updated'),
+                                        'dataset_name': dataset.get('name'),
+                                        'dataset_id': dataset.get('id'),
+                                        'resource_name': resource.get('name'),
+                                        'resource_id': resource.get('id'),
+                                        'domain': parsed.netloc,
+                                        'url': url,
+                                        'message': task_info.get("error", ""),
+                                        'twdh_url': "{}/dataset/{}".format( host, dataset.get('id'))
+                                    }
+                                )
+
+                                error = task_info.get("error", "")
+
+                                if error is None:
+                                    error_summary['Null']['count'] += 1
+                                    error_summary['Null']['ids'].append(dataset.get('name'))
+                                elif 'Solr returned an error' in error:
+                                    if 'HTTP 404' in error:
+                                        error_summary['SolrHttp404']['count'] += 1
+                                        error_summary['SolrHttp404']['ids'].append(dataset.get('name'))
+                                    elif 'HTTP 500' in error:
+                                        error_summary['SolrHttp500']['count'] += 1
+                                        error_summary['SolrHttp500']['ids'].append(dataset.get('name'))
+                                    elif 'HTTP 510' in error:
+                                        error_summary['SolrHttp510']['count'] += 1
+                                        error_summary['SolrHttp510']['ids'].append(dataset.get('name'))
+                                    elif 'TimeoutError' in error:
+                                        error_summary['SolrTimeoutError']['count'] += 1
+                                        error_summary['SolrTimeoutError']['ids'].append(dataset.get('name'))
+                                    else:
+                                        error_summary['OtherSolrError']['count'] += 1
+                                        error_summary['OtherSolrError']['ids'].append(dataset.get('name'))
+                                elif 'Invalid CSV' in error:
+                                    error_summary['InvalidCSV']['count'] += 1
+                                    error_summary['InvalidCSV']['ids'].append(dataset.get('name'))
+                                elif 'InvalidChunkLength' in error:
+                                    error_summary['InvalidChunkLength']['count'] += 1
+                                    error_summary['InvalidChunkLength']['ids'].append(dataset.get('name'))
+                                elif 'Invalid OLE signature' in error:
+                                    error_summary['InvalidOLESignature']['count'] += 1
+                                    error_summary['InvalidOLESignature']['ids'].append(dataset.get('name'))
+                                elif 'Read timed out' in error:
+                                    error_summary['ReadTimedOut']['count'] += 1
+                                    error_summary['ReadTimedOut']['ids'].append(dataset.get('name'))
+                                elif 'Max retries exceeded' in error:
+                                    error_summary['MaxRetriesExceeded']['count'] += 1
+                                    error_summary['MaxRetriesExceeded']['ids'].append(dataset.get('name'))
+                                elif 'unsupported file format' in error:
+                                    error_summary['UnsupportedFileFormat']['count'] += 1
+                                    error_summary['UnsupportedFileFormat']['ids'].append(dataset.get('name'))
+                                elif 'Status code: 404' in error:
+                                    error_summary['StatusCode404']['count'] += 1
+                                    error_summary['StatusCode404']['ids'].append(dataset.get('name'))
+                                elif 'Status code: 403' in error:
+                                    error_summary['StatusCode403']['count'] += 1
+                                    error_summary['StatusCode403']['ids'].append(dataset.get('name'))
+                                elif 'Status code: 504' in error:
+                                    error_summary['StatusCode504']['count'] += 1
+                                    error_summary['StatusCode504']['ids'].append(dataset.get('name'))
+                                elif 'qsv validate failed' in error:
+                                    error_summary['QSVValidationFailure']['count'] += 1
+                                    error_summary['QSVValidationFailure']['ids'].append(dataset.get('name'))
+                                else:
+                                    error_summary['Other']['count'] += 1
+                                    error_summary['Other']['ids'].append(dataset.get('name'))
+                                    error_summary_other.append( error )
+
+                            #logecho('task_info found', 'info')
+                            #if task_info.get('status') == 'error':
+                            #    logecho(dp_status.get('task_info',False).get('error'), 'error')
+                            #else:
+                            #    logecho('Success!', 'info')
+                            #else:
+                            #logecho('task_info not found', 'error')
+                            #logecho(dp_status.get('status'), 'error')
+
+                        result['dp_status'] = dp_status
+
+                    if dp_status.get("status") != "complete":
+                        errors.append( result )
+
+
+                else:
+                    result['dp_status'] = 'N/A'
+
+            except NotFound as e:
+                #logecho('Not Found exception!', 'error')
+                #logecho( "No datapusher_status found", "warning")
+                if( "datastore_active" in resource):
+                    if( resource.get("datastore_active") == True ):
+                        logecho( "No datapusher_status found", "warning")
+                        logecho("This is NOT ok because datastore_active is set to {}".format(resource.get('datastore_active')), 'error')
+                        errors.append( result )
+
+                else:
+                    logecho("This is ok because datastore_active is does not exist on this resource", 'info')
+            except Exception as e:
+                logecho( "Exception loading dataset {}: {}".format( id, e ), 'error')
+                print(traceback.format_exc())
+                exit(1)
+
+            results.append( result )
+
+    with open("{}/dp-results.json".format(report_dest), "w", encoding="utf-8") as f:
+        json.dump(results, f, indent=4)
+
+    with open("{}/dp-errors.json".format(report_dest), "w", encoding="utf-8") as f:
+        json.dump(errors, f, indent=4)
+
+    with open("{}/dp-error-urls.json".format(report_dest), "w", encoding="utf-8") as f:
+        json.dump(error_urls, f, indent=4)
+
+    with open("{}/dp-error-messages.json".format(report_dest), "w", encoding="utf-8") as f:
+        json.dump(error_messages, f, indent=4)
+
+    with open("{}/dp-error-detail.json".format(report_dest), "w", encoding="utf-8") as f:
+        json.dump(error_detail, f, indent=4)
+
+    with open("{}/dp-error-summary.json".format(report_dest), "w", encoding="utf-8") as f:
+        json.dump(error_summary, f, indent=4)
+
+
+    headers = error_detail[0].keys()
+    with open("{}/dp-error-detail.csv".format(report_dest), "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=headers)
+        writer.writeheader()  # Writes the header row
+        writer.writerows(error_detail)  # Writes all data rows
+
+
+    for error in error_summary:
+        logecho( "{}: {}".format( error, error_summary[error]['count'] ), 'warning')
+    if len(error_summary_other) > 0:
+        logecho( "Other errors:", 'warning')
+        for error in error_summary_other:
+            logecho( "{}".format( error ), 'warning')
+    logecho( "{} resources inspected".format(res_count))
+    logecho( "{} errors found".format(len(errors)))
+
+
+def tag_report(ctx,dest):
+    """
+    Generate report of tags and associated datasets
+    """
+
+    twdh = ctx.obj['twdh']
+    logecho = ctx.obj['logecho']
+    host = ctx.obj['host']
+
+    logecho( "Running tag report")
+    report_dest = mk_report_dir(ctx,dest)
+
+    results = {}
+    try:
+        tags = twdh.action.tag_list()
+        tags.sort()
+
+        for tag in tags:
+            datasets = twdh.action.package_search(
+                fq_list=[
+                    'tags:{}'.format(tag)
+                ],
+
+                rows=1000,
+                sort="name asc",
+                #fl=["type","name","title"]
+            )
+
+            logecho("{} ({})".format(tag,datasets.get('count',0)),"info")
+
+            if( datasets.get('count',0) > 0 ):
+                results[tag] = {}
+                results[tag]['url'] = "{}/dataset/?tags={}".format(host,tag)
+                results[tag]['count'] = datasets.get('count')
+                results[tag]['application_count'] = 0
+                results[tag]['dataset_count'] = 0
+                results[tag]['applications'] = []
+                results[tag]['datasets'] = []
+
+                for dataset in datasets.get('results',[]):
+                    logecho("  {}".format(dataset.get("title"),"info"))
+                    result = {}
+                    result["title"] = dataset.get("title")
+                    #result["type"] = dataset.get("type")
+                    result["url"] = "{}/dataset/{}".format(host,dataset.get("name"))
+                    if tag in dataset['primary_tags']:
+                        result['primary'] = True
+                    else:
+                        result['primary'] = False
+                    if( dataset.get("type") == "application"):
+                        results[tag]['application_count'] += 1
+                        results[tag]['applications'].append(result)
+                    else:
+                        results[tag]['dataset_count'] += 1
+                        results[tag]['datasets'].append(result)
+
+                if results[tag]["application_count"] == 0:
+                    results[tag].pop("applications")
+
+                if results[tag]["dataset_count"] == 0:
+                    results[tag].pop("datasets")
+
+    except Exception as e:
+        logecho( str(e), 'error')
+        print(traceback.format_exc())
+        exit(1)
+
+    report = {
+        'report': 'Tags Report',
+        'host': host,
+        'timestamp': datetime.now().isoformat(),
+        'tags': results
+    }
+
+    with open('{}/tag-report.json'.format(report_dest), "w", encoding="utf-8") as f:
+        json.dump(report, f, indent=4)
+
+def mk_report_dir(ctx,dest):
+
+    twdh = ctx.obj['twdh']
+    logecho = ctx.obj['logecho']
+    host = ctx.obj['host']
+
+    if not os.path.exists(dest):
+        logecho('Destination directory {} not found'.format(dest), level='error')
+        sys.exit()
+
+    try:
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        parsed_address = urlparse(twdh.address)
+        logecho( parsed_address.netloc )
+        report_dest = "{}/{}_{}".format( dest, parsed_address.netloc, timestamp )
+        Path(report_dest).mkdir(parents=True)
+
+    except Exception as e:
+        logecho('An error occurred: {}'.e, level='error')
+        sys.exit(1)
+
+    return report_dest
