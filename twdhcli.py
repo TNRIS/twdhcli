@@ -183,7 +183,7 @@ def twdhcli(ctx, host, apikey, test_run, quiet, debug, logfile):
 @twdhcli.command()
 @click.option('--dest',
               type=click.Path(),
-              default='./twdh-snapshots',
+              default='./twdh-reports/twdh-snapshots',
               show_default=True,
               help='The full path of the CSV output file.')
 @click.pass_context
@@ -196,7 +196,7 @@ def snapshot(ctx,dest):
 @twdhcli.command()
 @click.option('--dest',
               type=click.Path(),
-              default='./twdh-dpp-reports',
+              default='./twdh-reports/twdh-dpp-reports',
               show_default=True,
               help='The full path of the CSV output file.')
 @click.pass_context
@@ -210,7 +210,7 @@ def dpp_report(ctx,dest):
 @twdhcli.command()
 @click.option('--dest',
               type=click.Path(),
-              default='./twdh-tag-reports',
+              default='./twdh-reports/twdh-tag-reports',
               show_default=True,
               help='The full path of the CSV output file.')
 @click.pass_context
