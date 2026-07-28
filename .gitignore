@@ -3,6 +3,5 @@
 Docker/.env
 tmp
 .env
-twdh-snapshots
-twdh-archive
+twdh-reports
 __pycache__

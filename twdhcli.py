@@ -1,9 +1,7 @@
 from __future__ import annotations
 from colorama import init, Fore, Back, Style
 import click
-import click_config_file
 import ckanapi
-import requests
 import os
 import sys
 import json
@@ -15,8 +13,11 @@ import csv
 from pathlib import Path
 from urllib.parse import urlparse
 import subprocess
+import traceback
 
 import helpers as h
+import helpers_clone as ch
+import helpers_purge as ph
 
 version = '0.12.0'
 
@@ -27,6 +28,7 @@ log = logging.getLogger(__name__)
 FORMAT = '%(message)s'
 
 formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
+config = dotenv_values( ".env" )
 
 def setup_logger(name, log_file, level=logging.INFO):
 
@@ -140,16 +142,12 @@ def twdhcli(ctx, host, apikey, test_run, quiet, debug, logfile):
     if not os.path.exists("./.env"):
         logecho('.env file not found', level='warning')
 
-    config = dotenv_values( ".env" )
-
     if apikey == None:
         # apikey not passed as a parameter, check config
         apikey = config.get("apikey",None) 
         if apikey == None:
             logecho("Cannot continue: --apikey parameter not set and APIKEY not found in .env.secrets","error")
             exit(1)
-
-    logecho("apikey set", "detail")
 
     if host == None:
         # host not passed as a parameter, check config
@@ -174,6 +172,8 @@ def twdhcli(ctx, host, apikey, test_run, quiet, debug, logfile):
     ctx.obj['twdh'] = twdh
     ctx.obj['logecho'] = logecho
     ctx.obj['test_run'] = test_run
+    ctx.obj['apikey'] = apikey
+    ctx.obj['host'] = host
 
     if not h.apikey_validates(ctx,apikey):
         logecho("Cannot continue: --apikey parameter value is not a valid key","error")
@@ -183,7 +183,7 @@ def twdhcli(ctx, host, apikey, test_run, quiet, debug, logfile):
 @twdhcli.command()
 @click.option('--dest',
               type=click.Path(),
-              default='./twdh-snapshots',
+              default='./twdh-reports/twdh-snapshots',
               show_default=True,
               help='The full path of the CSV output file.')
 @click.pass_context
@@ -192,6 +192,33 @@ def snapshot(ctx,dest):
     Create JSON snapshot files for datasets, applications and organizations
     """
     h.snapshot(ctx,dest)
+
+@twdhcli.command()
+@click.option('--dest',
+              type=click.Path(),
+              default='./twdh-reports/twdh-dpp-reports',
+              show_default=True,
+              help='The full path of the CSV output file.')
+@click.pass_context
+def dpp_report(ctx,dest):
+    """
+    Create Datepusher Plus status report
+    """
+    h.dpp_report(ctx,dest)
+
+
+@twdhcli.command()
+@click.option('--dest',
+              type=click.Path(),
+              default='./twdh-reports/twdh-tag-reports',
+              show_default=True,
+              help='The full path of the CSV output file.')
+@click.pass_context
+def tag_report(ctx,dest):
+    """
+    Create Tag report
+    """
+    h.tag_report(ctx,dest)
 
 
 @twdhcli.command()
@@ -521,7 +548,6 @@ def patch_fn_clear_gazetteer(ctx,dataset,data):
         if test_run:
             return False
 
-        #breakpoint()
         if "gazetteer" in dataset:
             remote.action.package_patch( id=dataset.get("id"), gazetteer=None )
 
@@ -586,7 +612,6 @@ def patch_fn_set_spatial_data(ctx,dataset,data):
     logecho = ctx.obj['logecho']
     test_run = ctx.obj['test_run']
 
-    #breakpoint()
     spatial_extent = data.get('spatial_extent') or data.get('spatial_simp', '{}')
     spatial_full = data.get('spatial_full', '{}')
 
@@ -998,6 +1023,7 @@ def update_spatial_simp(ctx, new_size, ids, confirm_each, allow_enlarge, skip_sn
         try:
             spatial_extents = twdh.action.spatial_extents_show(id=dataset.get("id"))
 
+
         except Exception as e:
             logecho( e )
             sys.exit()
@@ -1034,7 +1060,6 @@ def update_spatial_simp(ctx, new_size, ids, confirm_each, allow_enlarge, skip_sn
                         new_spatial_extent = json.dumps(spatial_full)
                     else:
                         new_spatial_extent = h.simplify_geojson_by_size(ctx,spatial_full, new_size)
-                    #breakpoint()
                     if patch_fn_set_spatial_data(
                                 ctx,
                                 dataset,
@@ -1261,6 +1286,114 @@ def spatial_stats(ctx,ids,csvout):
 
     h.spatial_stats( ctx, ids, csvout )
 
+@twdhcli.command()
+@click.option('--host',
+              required=False,
+              help='TWDH CKAN host')
+@click.option('--apikey',
+              required=False,
+              help='TWDH CKAN API key to use if authentication is required.')
+@click.option(
+    "--confirm-wipe",
+    is_flag=True,
+    default=False,
+    help="Required. Confirms you understand all destination CKAN data will be deleted/purged."
+)
+@click.pass_context
+def wipe_data(ctx, host, apikey, confirm_wipe):
+    """
+    Wipe existing CKAN data from the current host using CKAN API delete/purge endpoints.
+
+    This command is intended only for local/DEV.
+    PROD is blocked by safety checks.
+    """
+    logecho = ctx.obj["logecho"]
+
+    if apikey is None:
+        apikey = ctx.obj['apikey']
+
+    if host is None:
+        host = ctx.obj['host']
+
+    try:
+        dest_twdh = ckanapi.RemoteCKAN(
+            host,
+            apikey=apikey,
+            user_agent='twdhcli/' + version
+        )
+
+    except Exception as e:
+        raise click.ClickException(
+            "Cannot connect safely to destination host {}: {}".format(host, e)
+        )
+
+    try:
+        h.assert_not_prod_destination(host)
+
+    except RuntimeError as e:
+        raise click.ClickException(str(e))
+
+    if not confirm_wipe:
+        raise click.ClickException(
+            "Refusing to wipe data without --confirm-wipe."
+        )
+
+    ph.wipe_destination(dest_twdh, logecho)
+
+@twdhcli.command()
+@click.option('--dest-host', required=True, help='Destination CKAN host. Must not be PROD.')
+@click.option('--snapshot-dir', default='./twdh-snapshots', show_default=True)
+@click.pass_context
+def clone(ctx, dest_host, snapshot_dir):
+    """
+    Clone from an existing snapshot directory into DEV/local.
+    """
+    logecho = ctx.obj['logecho']
+
+    try:
+        h.assert_not_prod_destination(dest_host)
+        snapshot_path = h.validate_snapshot_dir(snapshot_dir)
+
+    except RuntimeError as e:
+        raise click.ClickException(str(e))
+
+    dest_apikey = None
+    if dest_apikey is None:
+        dest_apikey = ctx.obj['apikey']
+
+    try:
+        dest_twdh = ckanapi.RemoteCKAN(
+            dest_host,
+            apikey=dest_apikey,
+            user_agent='twdhcli/' + version
+        )
+
+    except Exception as e:
+        raise click.ClickException(
+            "Cannot connect safely to destination host {}: {}".format(dest_host, e)
+        )
+
+    logecho("Clone input snapshot: {}".format(snapshot_path), "info")
+    logecho(
+        "Destination connected: {} ".format(
+            dest_host,
+        ),
+        "info",
+    )
+
+    restore_report = ch.restore_snapshot(
+        dest_twdh=dest_twdh,
+        snapshot_dir=str(snapshot_path),
+        logecho=logecho,
+    )
+
+    validate_report = ch.validate_clone_basic(dest_twdh, str(snapshot_path), logecho)
+
+    logecho(
+        "Clone restore report: {}".format(json.dumps(restore_report, indent=2)),
+        "info",
+    )
+    logecho("Clone completed without wiping destination data.", "celebration")
 
 if __name__ == '__main__':
     twdhcli(obj={},auto_envvar_prefix='TWDHCLI')
