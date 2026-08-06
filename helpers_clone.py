@@ -660,48 +660,48 @@ def clean_package_for_create(pkg):
 
     cleaned = normalize_owner_org_for_create(pkg, cleaned)
 
-    if cleaned.get("type") == "application":
-        groups = pkg.get("groups") or []
+    # if cleaned.get("type") == "application":
+    #     groups = pkg.get("groups") or []
 
-        group_value = first_value(cleaned.get("group"))
+    #     group_value = first_value(cleaned.get("group"))
 
-        if not group_value:
-            if groups and groups[0].get("name"):
-                group_value = groups[0]["name"]
-            else:
-                group_value = "planning"
+    #     if not group_value:
+    #         if groups and groups[0].get("name"):
+    #             group_value = groups[0]["name"]
+    #         else:
+    #             group_value = "planning"
 
-        cleaned["group"] = group_value
+    #     cleaned["group"] = group_value
 
-        valid_primary_tags = {
-            "administrative",
-            "agricultural",
-            "boundaries",
-            "climate",
-            "conservation",
-            "demographic",
-            "economic",
-            "environmental",
-            "flood",
-            "groundwater",
-            "hydrology",
-            "infrastructure",
-            "planning",
-            "regulatory",
-            "surface_water",
-            "water_quality",
-            "water_use",
-        }
+    #     valid_primary_tags = {
+    #         "administrative",
+    #         "agricultural",
+    #         "boundaries",
+    #         "climate",
+    #         "conservation",
+    #         "demographic",
+    #         "economic",
+    #         "environmental",
+    #         "flood",
+    #         "groundwater",
+    #         "hydrology",
+    #         "infrastructure",
+    #         "planning",
+    #         "regulatory",
+    #         "surface_water",
+    #         "water_quality",
+    #         "water_use",
+    #     }
 
-        primary_tags = first_value(cleaned.get("primary_tags"))
+    #     primary_tags = first_value(cleaned.get("primary_tags"))
 
-        if not primary_tags or primary_tags not in valid_primary_tags:
-            primary_tags = "administrative"
+    #     if not primary_tags or primary_tags not in valid_primary_tags:
+    #         primary_tags = "administrative"
 
-        cleaned["primary_tags"] = primary_tags
+    #     cleaned["primary_tags"] = primary_tags
 
-    else:
-        cleaned.pop("group", None)
+    # else:
+    #     pass
 
     cleaned = replace_package_email_fields(cleaned)
     cleaned = apply_dummy_defaults(cleaned)
